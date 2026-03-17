@@ -12,3 +12,7 @@ result-*
 *.test
 *.out
 vendor/
+
+# bench
+bench/pipe-bridge/pipe-bridge
+bench/results/
