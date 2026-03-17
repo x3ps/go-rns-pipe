@@ -24,8 +24,20 @@ jobs:
       - name: Build
         run: nix build
 
+      - name: Build example
+        run: nix build .#example
+
       - name: Test
         run: nix develop --command go test ./...
 
+      - name: Vet examples/tcp
+        run: nix develop --command bash -c "cd examples/tcp && go vet ./..."
+
+      - name: Build examples/tcp
+        run: nix develop --command bash -c "cd examples/tcp && go build -o /dev/null ."
+
       - name: Lint
         run: nix develop --command golangci-lint run
+
+      - name: Lint examples/tcp
+        run: nix develop --command bash -c "cd examples/tcp && golangci-lint run"
