@@ -14,21 +14,23 @@ type reconnector struct {
 	baseDelay   time.Duration
 	maxAttempts int // 0 = infinite
 	logger      *slog.Logger
-	onStatus    func(online bool)
 }
 
-// run executes fn in a loop until it succeeds (returns nil) or ctx is cancelled.
-// It applies exponential backoff with jitter between attempts, capped at 60s.
+// run executes fn in a loop until fn returns nil (context cancelled) or ctx is
+// cancelled externally. It applies exponential backoff with jitter between
+// attempts, capped at 60s. The first attempt has no delay.
 func (r *reconnector) run(ctx context.Context, fn func() error) error {
 	attempt := 0
 	for {
-		if r.maxAttempts > 0 && attempt >= r.maxAttempts {
+		if r.maxAttempts > 0 && attempt > r.maxAttempts {
 			r.logger.Error("max reconnect attempts reached", "attempts", attempt)
-			return context.Canceled
+			return ErrMaxReconnectAttemptsReached
 		}
 
 		delay := r.backoff(attempt)
-		r.logger.Info("attempting reconnect", "attempt", attempt+1, "delay", delay)
+		if attempt > 0 {
+			r.logger.Info("attempting reconnect", "attempt", attempt, "delay", delay)
+		}
 
 		select {
 		case <-ctx.Done():
@@ -42,19 +44,20 @@ func (r *reconnector) run(ctx context.Context, fn func() error) error {
 			continue
 		}
 
-		r.logger.Info("reconnected successfully", "attempt", attempt+1)
-		if r.onStatus != nil {
-			r.onStatus(true)
-		}
-		return nil
+		// fn returned nil — context was cancelled inside fn.
+		return ctx.Err()
 	}
 }
 
 // backoff computes the delay for a given attempt using exponential backoff with
-// jitter. The delay is capped at 60 seconds.
+// jitter. The first attempt (0) has no delay. Subsequent delays are capped at
+// 60 seconds.
 func (r *reconnector) backoff(attempt int) time.Duration {
+	if attempt == 0 {
+		return 0
+	}
 	maxDelay := 60 * time.Second
-	exp := math.Pow(2, float64(attempt))
+	exp := math.Pow(2, float64(attempt-1))
 	delay := time.Duration(float64(r.baseDelay) * exp)
 	if delay > maxDelay {
 		delay = maxDelay

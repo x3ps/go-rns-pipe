@@ -10,10 +10,7 @@ var (
 	// ErrAlreadyStarted is returned when Start is called on an already running interface.
 	ErrAlreadyStarted = errors.New("interface already started")
 
-	// ErrBufferFull is returned when the internal receive buffer is full and a
-	// packet must be dropped.
-	ErrBufferFull = errors.New("receive buffer full, packet dropped")
-
-	// ErrInvalidPacket is returned when a received packet fails validation.
-	ErrInvalidPacket = errors.New("invalid packet")
+	// ErrMaxReconnectAttemptsReached is returned by Start when all reconnect
+	// attempts are exhausted (MaxReconnectAttempts > 0).
+	ErrMaxReconnectAttemptsReached = errors.New("max reconnect attempts reached")
 )

@@ -15,10 +15,10 @@ type Config struct {
 	// See: Interface.py — RNS uses 500-byte physical MTU by default.
 	MTU int
 
-	// HW_MTU is the hardware-level maximum transfer unit used for HDLC buffer
+	// HWMTU is the hardware-level maximum transfer unit used for HDLC buffer
 	// sizing. Defaults to 1064, matching PipeInterface.py.
-	// See: PipeInterface.py#L72 — self.HW_MTU = 1064
-	HW_MTU int
+	// See: PipeInterface.py#L72 — self.HWMTU = 1064
+	HWMTU int
 
 	// Bitrate in bits/s. Defaults to 1000000 (1 Mbps), matching
 	// PipeInterface.BITRATE_GUESS.
@@ -30,8 +30,9 @@ type Config struct {
 	// See: PipeInterface.py#L67 — respawn_delay default = 5
 	ReconnectDelay time.Duration
 
-	// MaxReconnectAttempts is the maximum number of reconnection attempts.
-	// 0 means infinite retries.
+	// MaxReconnectAttempts is the maximum number of reconnection attempts after
+	// the initial connection fails. 0 means infinite retries (default).
+	// Example: MaxReconnectAttempts=1 allows one retry after the first failure.
 	MaxReconnectAttempts int
 
 	// LogLevel controls the verbosity of log output.
@@ -42,6 +43,12 @@ type Config struct {
 
 	// Stdin is the reader from which HDLC-framed packets are read (packets
 	// from rnsd). Defaults to os.Stdin.
+	//
+	// Stdin should implement io.Closer so that context cancellation can
+	// unblock the internal io.Copy goroutine. If Stdin does not implement
+	// io.Closer, cancelling the context will return from readLoop but the
+	// goroutine will remain blocked on the reader until the process exits.
+	// os.Stdin is deliberately excluded from this close path (see readLoop).
 	Stdin io.Reader
 
 	// Stdout is the writer to which HDLC-framed packets are written (packets
@@ -59,7 +66,7 @@ func DefaultConfig() Config {
 	return Config{
 		Name:              "PipeInterface",
 		MTU:               500,  // See: understanding.html — physical layer MTU of 500 bytes
-		HW_MTU:            1064, // See: PipeInterface.py#L72 — self.HW_MTU = 1064
+		HWMTU:             1064, // See: PipeInterface.py#L72 — self.HWMTU = 1064
 		Bitrate:           1_000_000,
 		ReconnectDelay:    5 * time.Second,
 		ReceiveBufferSize: 64,

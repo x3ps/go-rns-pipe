@@ -1,5 +1,10 @@
 package rnspipe
 
+import (
+	"sync"
+	"sync/atomic"
+)
+
 // HDLC constants for simplified HDLC framing, matching the Python RNS
 // implementation. The framing is similar to PPP.
 // See: PipeInterface.py#L40-L42 — HDLC class constants
@@ -41,11 +46,13 @@ func (e *Encoder) Encode(packet []byte) []byte {
 // Decoder reads a byte stream and extracts complete HDLC-framed packets.
 // It implements io.Writer so it can be fed raw bytes incrementally.
 type Decoder struct {
-	inFrame bool
-	escape  bool
-	buf     []byte
-	hwMTU   int
-	packets chan []byte
+	inFrame   bool
+	escape    bool
+	buf       []byte
+	hwMTU     int
+	packets   chan []byte
+	closeOnce sync.Once
+	dropped   atomic.Uint64
 }
 
 // NewDecoder creates a Decoder with the given hardware MTU limit and packet
@@ -66,6 +73,7 @@ func (d *Decoder) Write(b []byte) (int, error) {
 		if d.inFrame && byte_ == HDLCFlag {
 			// End of frame — deliver the packet
 			// See: PipeInterface.py#L121-L123
+			d.escape = false
 			d.inFrame = false
 			if len(d.buf) > 0 {
 				pkt := make([]byte, len(d.buf))
@@ -73,7 +81,8 @@ func (d *Decoder) Write(b []byte) (int, error) {
 				select {
 				case d.packets <- pkt:
 				default:
-					// Channel full — drop packet (caller handles logging)
+					// Channel full — drop packet
+					d.dropped.Add(1)
 				}
 			}
 			d.buf = d.buf[:0]
@@ -81,6 +90,7 @@ func (d *Decoder) Write(b []byte) (int, error) {
 			// Start of frame
 			// See: PipeInterface.py#L124-L126
 			d.inFrame = true
+			d.escape = false
 			d.buf = d.buf[:0]
 		} else if d.inFrame && len(d.buf) < d.hwMTU {
 			if byte_ == HDLCEscape {
@@ -89,12 +99,14 @@ func (d *Decoder) Write(b []byte) (int, error) {
 				d.escape = true
 			} else {
 				if d.escape {
-					// Unescape the byte by XOR with ESC_MASK
+					// Conditional unescaping exactly mirrors Python PipeInterface.py readLoop.
+					// Only the two valid escape sequences are remapped; any other byte following
+					// ESC is passed through unchanged (matching Python behaviour for malformed data).
 					// See: PipeInterface.py#L131-L134
-					if byte_ == HDLCFlag^HDLCEscMask {
+					switch byte_ {
+					case HDLCFlag ^ HDLCEscMask: // 0x5E → 0x7E
 						byte_ = HDLCFlag
-					}
-					if byte_ == HDLCEscape^HDLCEscMask {
+					case HDLCEscape ^ HDLCEscMask: // 0x5D → 0x7D
 						byte_ = HDLCEscape
 					}
 					d.escape = false
@@ -111,7 +123,12 @@ func (d *Decoder) Packets() <-chan []byte {
 	return d.packets
 }
 
-// Close closes the packets channel.
+// Close closes the packets channel. Safe to call multiple times.
 func (d *Decoder) Close() {
-	close(d.packets)
+	d.closeOnce.Do(func() { close(d.packets) })
+}
+
+// DroppedPackets returns the number of packets dropped due to a full channel.
+func (d *Decoder) DroppedPackets() uint64 {
+	return d.dropped.Load()
 }

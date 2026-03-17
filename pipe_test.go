@@ -3,6 +3,7 @@ package rnspipe
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"sync"
 	"testing"
@@ -307,6 +308,214 @@ func TestAlreadyStarted(t *testing.T) {
 	cancel()
 	_ = stdinW.Close()
 	<-done
+}
+
+// TestEOFTriggersReconnect verifies that a clean EOF on stdin triggers a
+// reconnect attempt rather than silently terminating the interface.
+func TestEOFTriggersReconnect(t *testing.T) {
+	stdinR, stdinW := io.Pipe()
+	var stdout bytes.Buffer
+
+	iface := New(Config{
+		Stdin:  stdinR,
+		Stdout: &stdout,
+		// One attempt: readLoop fails with EOF → ErrMaxReconnectAttemptsReached.
+		MaxReconnectAttempts: 1,
+		ReconnectDelay:       10 * time.Millisecond,
+	})
+
+	var received [][]byte
+	var mu sync.Mutex
+	iface.OnSend(func(pkt []byte) error {
+		mu.Lock()
+		received = append(received, pkt)
+		mu.Unlock()
+		return nil
+	})
+
+	offlineSeen := make(chan struct{}, 1)
+	iface.OnStatus(func(online bool) {
+		if !online {
+			select {
+			case offlineSeen <- struct{}{}:
+			default:
+			}
+		}
+	})
+
+	done := make(chan error, 1)
+	go func() {
+		done <- iface.Start(context.Background())
+	}()
+
+	// Write one valid HDLC frame then close stdin.
+	enc := &Encoder{}
+	payload := []byte("eof-test")
+	if _, err := stdinW.Write(enc.Encode(payload)); err != nil {
+		t.Fatalf("write frame: %v", err)
+	}
+	stdinW.Close()
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, ErrMaxReconnectAttemptsReached) {
+			t.Fatalf("expected ErrMaxReconnectAttemptsReached, got %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for Start to return")
+	}
+
+	// Verify the packet was delivered.
+	mu.Lock()
+	got := received
+	mu.Unlock()
+	if len(got) != 1 || !bytes.Equal(got[0], payload) {
+		t.Fatalf("expected one packet %x, got %v", payload, got)
+	}
+
+	// Verify offline transition was signalled.
+	select {
+	case <-offlineSeen:
+	default:
+		t.Fatal("expected offline status transition")
+	}
+
+	if iface.IsOnline() {
+		t.Fatal("expected interface offline after stop")
+	}
+}
+
+// TestDroppedPackets verifies that the Decoder counts dropped packets when the
+// channel is full.
+func TestDroppedPackets(t *testing.T) {
+	enc := &Encoder{}
+	frame1 := enc.Encode([]byte("pkt1"))
+	frame2 := enc.Encode([]byte("pkt2"))
+
+	// chanSize=1: first packet fills the channel, second is dropped.
+	dec := NewDecoder(1064, 1)
+	if _, err := dec.Write(frame1); err != nil {
+		t.Fatalf("write frame1: %v", err)
+	}
+	if _, err := dec.Write(frame2); err != nil {
+		t.Fatalf("write frame2: %v", err)
+	}
+
+	if got := dec.DroppedPackets(); got != 1 {
+		t.Fatalf("expected 1 dropped packet, got %d", got)
+	}
+	dec.Close()
+}
+
+// TestCallbackRaceDetector registers OnSend/OnStatus concurrently with an
+// active interface. Run with -race to verify no data races.
+func TestCallbackRaceDetector(t *testing.T) {
+	stdinR, stdinW := io.Pipe()
+	var stdout bytes.Buffer
+
+	iface := New(Config{
+		Stdin:  stdinR,
+		Stdout: &stdout,
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- iface.Start(ctx)
+	}()
+
+	time.Sleep(20 * time.Millisecond)
+
+	// Register callbacks from a separate goroutine while Start is running.
+	var wg sync.WaitGroup
+	for range 10 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			iface.OnSend(func([]byte) error { return nil })
+			iface.OnStatus(func(bool) {})
+		}()
+	}
+	wg.Wait()
+
+	cancel()
+	_ = stdinW.Close()
+	<-done
+}
+
+// TestShutdownNoGoroutineLeak verifies that cancelling the context causes
+// readLoop to close stdin and wait for the io.Copy goroutine before returning.
+// Run with -race to confirm no data race on the decoder after Start returns.
+func TestShutdownNoGoroutineLeak(t *testing.T) {
+	stdinR, stdinW := io.Pipe()
+	defer stdinW.Close()
+	var stdout bytes.Buffer
+
+	iface := New(Config{
+		Stdin:  stdinR,
+		Stdout: &stdout,
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- iface.Start(ctx)
+	}()
+
+	time.Sleep(50 * time.Millisecond)
+	cancel() // fix should close stdinR and wait for io.Copy goroutine
+
+	select {
+	case err := <-done:
+		if err != nil && err != context.Canceled {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout: goroutine likely leaked after context cancel")
+	}
+}
+
+// TestRestartAfterStop verifies that Start can be called again on the same
+// Interface after a previous Start has returned, without returning ErrAlreadyStarted.
+func TestRestartAfterStop(t *testing.T) {
+	stdinR, stdinW := io.Pipe()
+	var stdout bytes.Buffer
+
+	iface := New(Config{
+		Stdin:  stdinR,
+		Stdout: &stdout,
+	})
+
+	ctx1, cancel1 := context.WithCancel(context.Background())
+	done1 := make(chan error, 1)
+	go func() { done1 <- iface.Start(ctx1) }()
+
+	time.Sleep(50 * time.Millisecond)
+	cancel1()
+
+	select {
+	case <-done1:
+	case <-time.After(2 * time.Second):
+		_ = stdinW.Close()
+		t.Fatal("first Start did not return")
+	}
+	_ = stdinW.Close()
+
+	// After first Start returns, started should be false.
+	// Start again with an already-cancelled context so it returns immediately.
+	ctx2, cancel2 := context.WithCancel(context.Background())
+	cancel2()
+	done2 := make(chan error, 1)
+	go func() { done2 <- iface.Start(ctx2) }()
+
+	select {
+	case err := <-done2:
+		if errors.Is(err, ErrAlreadyStarted) {
+			t.Fatal("Start returned ErrAlreadyStarted after previous Stop")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("second Start did not return")
+	}
 }
 
 // syncWriter is a thread-safe bytes.Buffer for concurrent writes.

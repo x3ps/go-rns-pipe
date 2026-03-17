@@ -20,7 +20,6 @@ type Interface struct {
 	online   bool
 	started  bool
 	encoder  Encoder
-	decoder  *Decoder
 	onSend   func([]byte) error // called when a decoded packet arrives from stdin
 	onStatus func(bool)         // called on online/offline transitions
 	logger   *slog.Logger
@@ -37,8 +36,8 @@ func New(config Config) *Interface {
 	if config.MTU == 0 {
 		config.MTU = defaults.MTU
 	}
-	if config.HW_MTU == 0 {
-		config.HW_MTU = defaults.HW_MTU
+	if config.HWMTU == 0 {
+		config.HWMTU = defaults.HWMTU
 	}
 	if config.Bitrate == 0 {
 		config.Bitrate = defaults.Bitrate
@@ -49,6 +48,25 @@ func New(config Config) *Interface {
 	if config.ReceiveBufferSize == 0 {
 		config.ReceiveBufferSize = defaults.ReceiveBufferSize
 	}
+
+	// Clamp negative values to defaults to prevent downstream panics
+	// (e.g. make(chan []byte, negative) in NewDecoder).
+	if config.MTU < 0 {
+		config.MTU = defaults.MTU
+	}
+	if config.HWMTU < 0 {
+		config.HWMTU = defaults.HWMTU
+	}
+	if config.Bitrate < 0 {
+		config.Bitrate = defaults.Bitrate
+	}
+	if config.ReconnectDelay < 0 {
+		config.ReconnectDelay = defaults.ReconnectDelay
+	}
+	if config.ReceiveBufferSize < 0 {
+		config.ReceiveBufferSize = defaults.ReceiveBufferSize
+	}
+
 	if config.Stdin == nil {
 		config.Stdin = os.Stdin
 	}
@@ -71,12 +89,16 @@ func New(config Config) *Interface {
 
 // OnSend registers a callback invoked for each decoded packet read from stdin.
 func (iface *Interface) OnSend(fn func([]byte) error) {
+	iface.mu.Lock()
 	iface.onSend = fn
+	iface.mu.Unlock()
 }
 
 // OnStatus registers a callback invoked on online/offline transitions.
 func (iface *Interface) OnStatus(fn func(bool)) {
+	iface.mu.Lock()
 	iface.onStatus = fn
+	iface.mu.Unlock()
 }
 
 // Start begins reading HDLC-framed packets from config.Stdin. Decoded packets
@@ -84,7 +106,7 @@ func (iface *Interface) OnStatus(fn func(bool)) {
 // an unrecoverable error occurs.
 //
 // The interface goes online immediately (no handshake), matching PipeInterface.py.
-// On read errors, it attempts reconnection with exponential backoff.
+// On read errors or clean EOF, it attempts reconnection with exponential backoff.
 func (iface *Interface) Start(ctx context.Context) error {
 	iface.mu.Lock()
 	if iface.started {
@@ -100,69 +122,79 @@ func (iface *Interface) Start(ctx context.Context) error {
 		iface.started = false
 		iface.cancelFn = nil
 		iface.mu.Unlock()
+		iface.setOnline(false) // safety net
 	}()
 
 	recon := &reconnector{
 		baseDelay:   iface.config.ReconnectDelay,
 		maxAttempts: iface.config.MaxReconnectAttempts,
 		logger:      iface.logger,
-		onStatus: func(online bool) {
-			iface.setOnline(online)
-		},
 	}
 
-	for {
+	return recon.run(ctx, func() error {
 		iface.setOnline(true)
-
 		err := iface.readLoop(ctx)
-		if err == nil || ctx.Err() != nil {
-			iface.setOnline(false)
-			return ctx.Err()
-		}
-
-		iface.logger.Warn("read loop exited", "error", err)
 		iface.setOnline(false)
-
-		// Attempt reconnection — the retry fn just re-enters the read loop.
-		// If the underlying reader is a pipe to a subprocess, the provider
-		// is responsible for restarting it and supplying a new reader.
-		reconErr := recon.run(ctx, func() error {
-			return iface.readLoop(ctx)
-		})
-		if reconErr != nil {
-			return reconErr
-		}
-	}
+		return err // nil = ctx cancelled; io.EOF / other error = reconnect
+	})
 }
 
 // readLoop reads from stdin, feeds bytes into the HDLC decoder, and dispatches
-// decoded packets via onSend. Returns on read error or context cancellation.
+// decoded packets via onSend. Returns nil on context cancellation, io.EOF on
+// clean EOF (triggers reconnect), or another error on read failure.
+//
+// On context cancellation, if Stdin implements io.Closer it is closed to
+// unblock the io.Copy goroutine, and readLoop waits for the goroutine to exit.
+// os.Stdin is explicitly excluded from this close: closing os.Stdin would affect
+// the entire process and is unexpected for a long-running daemon. If Stdin does
+// not implement io.Closer (and is not os.Stdin), the goroutine will remain
+// blocked until the reader is otherwise closed.
 func (iface *Interface) readLoop(ctx context.Context) error {
-	decoder := NewDecoder(iface.config.HW_MTU, iface.config.ReceiveBufferSize)
-	iface.mu.Lock()
-	iface.decoder = decoder
-	iface.mu.Unlock()
-
-	defer decoder.Close()
+	decoder := NewDecoder(iface.config.HWMTU, iface.config.ReceiveBufferSize)
 
 	// Read goroutine: feed stdin bytes into decoder.
+	// decoder.Close() is called here so the packets channel is only closed
+	// after all bytes have been processed — preventing a write-to-closed-channel panic.
 	readErr := make(chan error, 1)
 	go func() {
 		_, err := io.Copy(decoder, iface.config.Stdin)
+		decoder.Close()
 		readErr <- err
 	}()
 
+	pkts := decoder.Packets()
 	for {
 		select {
 		case <-ctx.Done():
+			if iface.config.Stdin != os.Stdin {
+				if closer, ok := iface.config.Stdin.(io.Closer); ok {
+					_ = closer.Close()
+					<-readErr // wait for io.Copy goroutine to exit
+				}
+			}
 			return nil
 		case err := <-readErr:
 			// Drain any remaining packets before returning.
 			iface.drainPackets(decoder)
+			if dropped := decoder.DroppedPackets(); dropped > 0 {
+				iface.logger.Warn("packets dropped during read", "count", dropped)
+			}
+			if err == nil {
+				// Clean EOF: remote closed the pipe. Signal reconnect.
+				return io.EOF
+			}
 			return err
-		case pkt := <-decoder.Packets():
-			if iface.onSend != nil {
-				if err := iface.onSend(pkt); err != nil {
+		case pkt, ok := <-pkts:
+			if !ok {
+				// Channel closed; disable this case and wait for readErr.
+				pkts = nil
+				continue
+			}
+			iface.mu.RLock()
+			cb := iface.onSend
+			iface.mu.RUnlock()
+			if cb != nil {
+				if err := cb(pkt); err != nil {
 					iface.logger.Warn("onSend callback error", "error", err)
 				}
 			}
@@ -172,11 +204,17 @@ func (iface *Interface) readLoop(ctx context.Context) error {
 
 // drainPackets consumes any remaining packets from the decoder channel.
 func (iface *Interface) drainPackets(decoder *Decoder) {
+	iface.mu.RLock()
+	cb := iface.onSend
+	iface.mu.RUnlock()
 	for {
 		select {
-		case pkt := <-decoder.Packets():
-			if iface.onSend != nil {
-				_ = iface.onSend(pkt)
+		case pkt, ok := <-decoder.Packets():
+			if !ok {
+				return // channel closed
+			}
+			if cb != nil {
+				_ = cb(pkt)
 			}
 		default:
 			return
@@ -184,8 +222,9 @@ func (iface *Interface) drainPackets(decoder *Decoder) {
 	}
 }
 
-// Receive encodes a packet with HDLC framing and writes it to config.Stdout.
-// This is called when the user wants to send a packet into the pipe (towards rnsd).
+// Receive encodes packet with HDLC framing and writes it to config.Stdout (towards rnsd).
+// Despite the name (which matches the Python PipeInterface API), this is outbound from
+// the caller's perspective: use it to inject a packet into the RNS pipe.
 func (iface *Interface) Receive(packet []byte) error {
 	iface.mu.RLock()
 	started := iface.started
@@ -221,13 +260,19 @@ func (iface *Interface) MTU() int {
 	return iface.config.MTU
 }
 
+// HWMTU returns the configured hardware MTU.
+func (iface *Interface) HWMTU() int {
+	return iface.config.HWMTU
+}
+
 func (iface *Interface) setOnline(online bool) {
 	iface.mu.Lock()
 	changed := iface.online != online
 	iface.online = online
+	cb := iface.onStatus
 	iface.mu.Unlock()
 
-	if changed && iface.onStatus != nil {
-		iface.onStatus(online)
+	if changed && cb != nil {
+		cb(online)
 	}
 }
