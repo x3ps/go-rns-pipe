@@ -18,6 +18,7 @@ destination = RNS.Destination(
     "bench",
     "reflector",
 )
+destination.set_proof_strategy(RNS.Destination.PROVE_ALL)
 
 destination.announce()
 

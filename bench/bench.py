@@ -139,6 +139,28 @@ def get_reflector_hash() -> str:
     return result.stdout.strip()
 
 
+def get_outbound_destination(dest_hash_hex: str):
+    dest_hash = bytes.fromhex(dest_hash_hex)
+
+    if not RNS.Transport.has_path(dest_hash):
+        console.print("  Requesting path to reflector...")
+        RNS.Transport.request_path(dest_hash)
+        if not RNS.Transport.await_path(dest_hash, timeout=30):
+            return None
+
+    remote_identity = RNS.Identity.recall(dest_hash)
+    if remote_identity is None:
+        return None
+
+    return RNS.Destination(
+        remote_identity,
+        RNS.Destination.OUT,
+        RNS.Destination.SINGLE,
+        "bench",
+        "reflector",
+    )
+
+
 def configure_rns(node_a_host: str, node_a_port: int, configdir: str) -> RNS.Reticulum:
     """Start a local RNS instance connected to node-a via TCP."""
     os.makedirs(configdir, exist_ok=True)
@@ -167,12 +189,11 @@ def run_test_connectivity(reticulum, dest_hash_hex: str) -> dict:
     dest_hash = bytes.fromhex(dest_hash_hex)
 
     t0 = time.time()
-    known = False
-    for _ in range(30):
-        if RNS.Transport.has_path(dest_hash):
-            known = True
-            break
-        time.sleep(1)
+    known = RNS.Transport.has_path(dest_hash)
+    if not known:
+        console.print("  Requesting path to reflector...")
+        RNS.Transport.request_path(dest_hash)
+        known = RNS.Transport.await_path(dest_hash, timeout=30)
 
     elapsed_ms = (time.time() - t0) * 1000
 
@@ -196,7 +217,10 @@ def run_test_connectivity(reticulum, dest_hash_hex: str) -> dict:
 
 def run_test_packet_sweep(reticulum, dest_hash_hex: str, sizes: list, n_packets: int) -> list[dict]:
     console.print("[bold cyan]Test 2: Packet latency sweep[/bold cyan]")
-    dest_hash = bytes.fromhex(dest_hash_hex)
+    dest = get_outbound_destination(dest_hash_hex)
+    if dest is None:
+        console.print("[red]Could not resolve reflector destination identity[/red]")
+        return []
 
     rows = []
     for size in sizes:
@@ -209,11 +233,6 @@ def run_test_packet_sweep(reticulum, dest_hash_hex: str, sizes: list, n_packets:
                 payload = b"\x00" * size
             else:
                 payload = struct.pack(">q", time.time_ns()) + b"\x00" * (size - 8)
-
-            identity = RNS.Identity()
-            dest = RNS.Destination(
-                identity, RNS.Destination.OUT, RNS.Destination.SINGLE, "bench", "reflector"
-            )
 
             t_send = time.time_ns()
             try:
@@ -248,14 +267,13 @@ def run_test_packet_sweep(reticulum, dest_hash_hex: str, sizes: list, n_packets:
 
 def run_test_burst(reticulum, dest_hash_hex: str, burst_size: int = 50) -> list[dict]:
     console.print("[bold cyan]Test 3: Burst throughput[/bold cyan]")
-    dest_hash = bytes.fromhex(dest_hash_hex)
+    dest = get_outbound_destination(dest_hash_hex)
+    if dest is None:
+        console.print("[red]Could not resolve reflector destination identity[/red]")
+        return []
+
     payload_size = 256
     rows = []
-
-    identity = RNS.Identity()
-    dest = RNS.Destination(
-        identity, RNS.Destination.OUT, RNS.Destination.SINGLE, "bench", "reflector"
-    )
 
     t_start = time.time()
     for i in range(burst_size):
