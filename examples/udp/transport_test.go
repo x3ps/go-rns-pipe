@@ -52,7 +52,11 @@ func TestOpenUDPConn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("openUDPConn: %v", err)
 	}
-	defer conn.Close()
+	defer func() {
+		if err := conn.Close(); err != nil {
+			t.Errorf("conn.Close: %v", err)
+		}
+	}()
 
 	if conn.LocalAddr() == nil {
 		t.Fatal("expected non-nil local addr")
@@ -102,7 +106,11 @@ func TestReadLoop(t *testing.T) {
 	if err != nil {
 		t.Fatalf("openUDPConn: %v", err)
 	}
-	defer conn.Close()
+	defer func() {
+		if err := conn.Close(); err != nil {
+			t.Errorf("conn.Close: %v", err)
+		}
+	}()
 
 	transport := NewTransport(Config{MTU: 500}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 
@@ -117,7 +125,11 @@ func TestReadLoop(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sender ListenUDP: %v", err)
 	}
-	defer sender.Close()
+	defer func() {
+		if err := sender.Close(); err != nil {
+			t.Errorf("sender.Close: %v", err)
+		}
+	}()
 
 	if _, err := sender.WriteTo(payload, conn.LocalAddr()); err != nil {
 		t.Fatalf("WriteTo: %v", err)
