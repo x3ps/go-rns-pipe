@@ -30,10 +30,10 @@ func TestClientConnectDisconnect(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer ln.Close()
+	defer func() { _ = ln.Close() }()
 
 	stdinR, stdinW := io.Pipe()
-	defer stdinW.Close()
+	defer func() { _ = stdinW.Close() }()
 	iface := newTestIface(stdinR, &bytes.Buffer{})
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -61,7 +61,7 @@ func TestClientConnectDisconnect(t *testing.T) {
 		cancel()
 		t.Fatalf("accept: %v", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	cancel()
 	_ = stdinW.Close()
@@ -78,7 +78,7 @@ func TestClientConnectDisconnect(t *testing.T) {
 // verifies it shuts down cleanly when ctx is cancelled.
 func TestServerAcceptAndShutdown(t *testing.T) {
 	stdinR, stdinW := io.Pipe()
-	defer stdinW.Close()
+	defer func() { _ = stdinW.Close() }()
 	iface := newTestIface(stdinR, &bytes.Buffer{})
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -112,7 +112,7 @@ func TestServerAcceptAndShutdown(t *testing.T) {
 // and call os.Exit(1). Uses an invalid listen address to force an immediate error.
 func TestErrorPropagation(t *testing.T) {
 	stdinR, stdinW := io.Pipe()
-	defer stdinW.Close()
+	defer func() { _ = stdinW.Close() }()
 	iface := newTestIface(stdinR, &bytes.Buffer{})
 
 	ctx, cancel := context.WithCancel(context.Background())

@@ -16,7 +16,7 @@ func loopbackConn(t *testing.T) (server, client net.Conn) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { ln.Close() })
+	t.Cleanup(func() { _ = ln.Close() })
 
 	connCh := make(chan net.Conn, 1)
 	go func() {
@@ -30,11 +30,11 @@ func loopbackConn(t *testing.T) (server, client net.Conn) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { client.Close() })
+	t.Cleanup(func() { _ = client.Close() })
 
 	select {
 	case server = <-connCh:
-		t.Cleanup(func() { server.Close() })
+		t.Cleanup(func() { _ = server.Close() })
 	case <-time.After(2 * time.Second):
 		t.Fatal("loopbackConn: accept timeout")
 	}
