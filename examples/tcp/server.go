@@ -145,7 +145,7 @@ func handleClient(ctx context.Context, conn net.Conn, pool *connPool, cfg Config
 	defer readCancel()
 
 	go func() {
-		readDone <- readPackets(readCtx, conn, cfg.MTU*2+64, packets)
+		readDone <- readPackets(readCtx, conn, iface.HWMTU(), packets)
 	}()
 
 	for {

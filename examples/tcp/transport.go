@@ -30,31 +30,55 @@ func writePacket(conn net.Conn, enc *rnspipe.Encoder, packet []byte) error {
 // See: TCPInterface.py — no app-level handshake, raw HDLC on connect
 func readPackets(ctx context.Context, conn net.Conn, hwMTU int, packets chan<- []byte) error {
 	decoder := rnspipe.NewDecoder(hwMTU, 64)
-	defer decoder.Close()
 
 	// Feed TCP bytes into the HDLC decoder in a goroutine.
+	// decoder.Close() is called inside the goroutine after io.Copy exits so
+	// the packets channel is only closed once all bytes are processed.
 	readErr := make(chan error, 1)
 	go func() {
 		_, err := io.Copy(decoder, conn)
+		decoder.Close()
 		readErr <- err
 	}()
 
+	pktsC := decoder.Packets()
 	for {
 		select {
 		case <-ctx.Done():
+			_ = conn.Close() // unblock io.Copy
+			<-readErr        // wait for goroutine to exit
 			return ctx.Err()
 		case err := <-readErr:
 			// Drain remaining decoded packets before returning.
 			for {
 				select {
-				case pkt := <-decoder.Packets():
-					packets <- pkt
+				case pkt, ok := <-pktsC:
+					if !ok {
+						return err
+					}
+					select {
+					case packets <- pkt:
+					default:
+						// receiver gone, drop remaining
+						return err
+					}
 				default:
 					return err
 				}
 			}
-		case pkt := <-decoder.Packets():
-			packets <- pkt
+		case pkt, ok := <-pktsC:
+			if !ok {
+				// Channel closed; disable this case and wait for readErr.
+				pktsC = nil
+				continue
+			}
+			select {
+			case packets <- pkt:
+			case <-ctx.Done():
+				_ = conn.Close()
+				<-readErr
+				return ctx.Err()
+			}
 		}
 	}
 }

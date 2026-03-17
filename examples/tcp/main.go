@@ -76,11 +76,12 @@ func main() {
 
 	// Wait for first error.
 	err := <-errc
+	ctxErr := ctx.Err() // capture BEFORE cancel() sets it
 	cancel()
 	// Wait for second goroutine to finish.
 	<-errc
 
-	if err != nil && ctx.Err() == nil {
+	if err != nil && ctxErr == nil {
 		logger.Error("fatal error", "error", err)
 		os.Exit(1)
 	}

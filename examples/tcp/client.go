@@ -92,7 +92,7 @@ func runClient(ctx context.Context, cfg Config, iface *rnspipe.Interface, logger
 		readCtx, readCancel := context.WithCancel(ctx)
 		readDone := make(chan error, 1)
 		go func() {
-			readDone <- readPackets(readCtx, conn, cfg.MTU*2+64, packets)
+			readDone <- readPackets(readCtx, conn, iface.HWMTU(), packets)
 		}()
 
 	loop:
@@ -147,9 +147,13 @@ func sleepBackoff(ctx context.Context, base time.Duration, attempt int) error {
 }
 
 // backoff computes exponential backoff with ±25% jitter, capped at 60s.
+// attempt=0 returns 0 (no delay on first try). Matches reconnect.go formula.
 func backoff(base time.Duration, attempt int) time.Duration {
+	if attempt == 0 {
+		return 0
+	}
 	maxDelay := 60 * time.Second
-	exp := math.Pow(2, float64(attempt))
+	exp := math.Pow(2, float64(attempt-1))
 	delay := time.Duration(float64(base) * exp)
 	if delay > maxDelay {
 		delay = maxDelay
