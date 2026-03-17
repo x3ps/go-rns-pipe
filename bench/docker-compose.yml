@@ -1,5 +1,3 @@
-version: "3.9"
-
 networks:
   bench-net:
     driver: bridge
@@ -23,7 +21,7 @@ services:
 
   rns-node-b:
     build:
-      context: bench/node-b
+      context: node-b
       dockerfile: Dockerfile
     container_name: rns-node-b
     hostname: rns-node-b
