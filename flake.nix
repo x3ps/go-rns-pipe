@@ -35,14 +35,6 @@
 
         packages.default = self.packages.${system}.rns-tcp-iface;
 
-        packages.example = pkgs.buildGoModule {
-          pname = "go-rns-pipe-tcp-example";
-          version = "0.0.0";
-          src = ./.;
-          subPackages = [ "example" ];
-          vendorHash = null;
-        };
-
         checks.default = pkgs.stdenvNoCC.mkDerivation {
           name = "go-rns-pipe-checks";
           src = ./.;

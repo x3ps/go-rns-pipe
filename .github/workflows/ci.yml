@@ -24,9 +24,6 @@ jobs:
       - name: Build
         run: nix build
 
-      - name: Build example
-        run: nix build .#example
-
       - name: Test
         run: nix develop --command go test ./...
 
