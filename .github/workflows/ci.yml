@@ -8,6 +8,9 @@ on:
 jobs:
   check:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write   # OIDC / FlakeHub cache
     steps:
       - uses: actions/checkout@v6.0.2
 
