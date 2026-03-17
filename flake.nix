@@ -91,6 +91,7 @@
             pkgs.go-task
             gomod2nixPkgs.gomod2nix
             pkgs.git
+            pkgs.python3 # for `go test -tags=integration`; install rns: python3 -m pip install rns
           ];
         };
       }
