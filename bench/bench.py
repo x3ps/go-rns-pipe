@@ -7,9 +7,12 @@ then produces plots and a Markdown report.
 """
 
 import argparse
+import csv
+import math
 import os
 import subprocess
 import socket
+import statistics
 import struct
 import time
 import sys
@@ -22,11 +25,6 @@ except ImportError:
     sys.exit(1)
 
 try:
-    import pandas as pd
-    import numpy as np
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
     from rich.console import Console
     from rich.table import Table
 except ImportError as e:
@@ -34,6 +32,7 @@ except ImportError as e:
     sys.exit(1)
 
 console = Console()
+plt = None
 
 # ---------------------------------------------------------------------------
 # HDLC constants (must match hdlc.go)
@@ -53,6 +52,66 @@ def hdlc_encode(data: bytes) -> bytes:
         else:
             escaped.append(b)
     return bytes([HDLC_FLAG]) + bytes(escaped) + bytes([HDLC_FLAG])
+
+
+def init_plotting() -> bool:
+    global plt
+    if plt is not None:
+        return True
+
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as pyplot
+    except Exception as e:
+        console.print(f"[yellow]Plotting disabled: {e}[/yellow]")
+        return False
+
+    plt = pyplot
+    return True
+
+
+def unique_values(rows: list[dict], key: str) -> list:
+    return sorted({row[key] for row in rows if key in row and row[key] is not None})
+
+
+def filter_rows(rows: list[dict], **conditions) -> list[dict]:
+    result = []
+    for row in rows:
+        if all(row.get(key) == value for key, value in conditions.items()):
+            result.append(row)
+    return result
+
+
+def values(rows: list[dict], key: str) -> list:
+    return [row[key] for row in rows if row.get(key) is not None]
+
+
+def median_or_nan(nums: list[float]) -> float:
+    return statistics.median(nums) if nums else float("nan")
+
+
+def quantile(nums: list[float], q: float) -> float:
+    if not nums:
+        return float("nan")
+    ordered = sorted(nums)
+    if len(ordered) == 1:
+        return ordered[0]
+    pos = (len(ordered) - 1) * q
+    lower = math.floor(pos)
+    upper = math.ceil(pos)
+    if lower == upper:
+        return ordered[lower]
+    fraction = pos - lower
+    return ordered[lower] * (1 - fraction) + ordered[upper] * fraction
+
+
+def write_csv(rows: list[dict], path: str, fieldnames: list[str]) -> None:
+    with open(path, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({name: row.get(name) for name in fieldnames})
 
 
 # ---------------------------------------------------------------------------
@@ -135,7 +194,7 @@ def run_test_connectivity(reticulum, dest_hash_hex: str) -> dict:
 # Test 2 — Packet sweep (latency + loss by size)
 # ---------------------------------------------------------------------------
 
-def run_test_packet_sweep(reticulum, dest_hash_hex: str, sizes: list, n_packets: int) -> pd.DataFrame:
+def run_test_packet_sweep(reticulum, dest_hash_hex: str, sizes: list, n_packets: int) -> list[dict]:
     console.print("[bold cyan]Test 2: Packet latency sweep[/bold cyan]")
     dest_hash = bytes.fromhex(dest_hash_hex)
 
@@ -180,14 +239,14 @@ def run_test_packet_sweep(reticulum, dest_hash_hex: str, sizes: list, n_packets:
         loss_pct = 100 * (sent - received) / max(sent, 1)
         console.print(f"    delivered={received}/{sent} loss={loss_pct:.1f}%")
 
-    return pd.DataFrame(rows)
+    return rows
 
 
 # ---------------------------------------------------------------------------
 # Test 3 — Burst
 # ---------------------------------------------------------------------------
 
-def run_test_burst(reticulum, dest_hash_hex: str, burst_size: int = 50) -> pd.DataFrame:
+def run_test_burst(reticulum, dest_hash_hex: str, burst_size: int = 50) -> list[dict]:
     console.print("[bold cyan]Test 3: Burst throughput[/bold cyan]")
     dest_hash = bytes.fromhex(dest_hash_hex)
     payload_size = 256
@@ -219,7 +278,7 @@ def run_test_burst(reticulum, dest_hash_hex: str, burst_size: int = 50) -> pd.Da
     throughput_kbps = (total_bytes / 1024) / elapsed if elapsed > 0 else 0
     console.print(f"  {len(rows)}/{burst_size} packets in {elapsed:.2f}s — {throughput_kbps:.1f} KB/s")
 
-    return pd.DataFrame(rows)
+    return rows
 
 
 # ---------------------------------------------------------------------------
@@ -337,14 +396,14 @@ def run_test_hdlc_integrity(pipe_bridge_bin: str) -> dict:
 # Plotting
 # ---------------------------------------------------------------------------
 
-def plot_latency_by_size(df: pd.DataFrame, outdir: str):
+def plot_latency_by_size(rows: list[dict], outdir: str):
     fig, ax = plt.subplots(figsize=(8, 5))
-    delivered = df[df["delivered"] == True]
-    if delivered.empty:
+    delivered = filter_rows(rows, delivered=True)
+    if not delivered:
         ax.text(0.5, 0.5, "No delivered packets", ha="center", va="center")
     else:
-        sizes = sorted(delivered["size"].unique())
-        data = [delivered[delivered["size"] == s]["latency_ms"].dropna().values for s in sizes]
+        sizes = unique_values(delivered, "size")
+        data = [values(filter_rows(delivered, size=s), "latency_ms") for s in sizes]
         ax.boxplot(data, labels=[str(s) for s in sizes])
         ax.set_xlabel("Packet size (bytes)")
         ax.set_ylabel("Latency (ms)")
@@ -354,17 +413,17 @@ def plot_latency_by_size(df: pd.DataFrame, outdir: str):
     plt.close(fig)
 
 
-def plot_throughput(df: pd.DataFrame, outdir: str):
+def plot_throughput(rows: list[dict], outdir: str):
     fig, ax = plt.subplots(figsize=(8, 5))
-    if df.empty or "size" not in df.columns:
+    if not rows:
         ax.text(0.5, 0.5, "No data", ha="center", va="center")
     else:
-        delivered = df[df["delivered"] == True]
-        sizes = sorted(delivered["size"].unique())
+        delivered = filter_rows(rows, delivered=True)
+        sizes = unique_values(delivered, "size")
         # Approximate throughput: (n_delivered * size) / (n * 0.05s inter-packet)
         throughputs = []
         for s in sizes:
-            sub = delivered[delivered["size"] == s]
+            sub = filter_rows(delivered, size=s)
             n = len(sub)
             total_time = n * 0.05 if n > 0 else 1
             kbps = (n * s / 1024) / total_time
@@ -378,15 +437,15 @@ def plot_throughput(df: pd.DataFrame, outdir: str):
     plt.close(fig)
 
 
-def plot_cdf_latency(df: pd.DataFrame, outdir: str):
+def plot_cdf_latency(rows: list[dict], outdir: str):
     fig, ax = plt.subplots(figsize=(8, 5))
-    delivered = df[df["delivered"] == True] if not df.empty else df
-    if delivered.empty:
+    delivered = filter_rows(rows, delivered=True)
+    if not delivered:
         ax.text(0.5, 0.5, "No data", ha="center", va="center")
     else:
-        for size in sorted(delivered["size"].unique()):
-            vals = delivered[delivered["size"] == size]["latency_ms"].dropna().sort_values()
-            cdf = np.arange(1, len(vals) + 1) / len(vals)
+        for size in unique_values(delivered, "size"):
+            vals = sorted(values(filter_rows(delivered, size=size), "latency_ms"))
+            cdf = [(i + 1) / len(vals) for i in range(len(vals))]
             ax.plot(vals, cdf, label=f"{size}B")
         ax.set_xlabel("Latency (ms)")
         ax.set_ylabel("CDF")
@@ -397,12 +456,12 @@ def plot_cdf_latency(df: pd.DataFrame, outdir: str):
     plt.close(fig)
 
 
-def plot_burst_timeline(df: pd.DataFrame, outdir: str):
+def plot_burst_timeline(rows: list[dict], outdir: str):
     fig, ax = plt.subplots(figsize=(8, 5))
-    if df.empty:
+    if not rows:
         ax.text(0.5, 0.5, "No data", ha="center", va="center")
     else:
-        ax.scatter(df["t_relative_ms"], df["seq"], s=10)
+        ax.scatter(values(rows, "t_relative_ms"), values(rows, "seq"), s=10)
         ax.set_xlabel("Time (ms)")
         ax.set_ylabel("Packet sequence")
         ax.set_title("Burst packet send timeline")
@@ -440,7 +499,7 @@ def plot_hdlc_integrity(result: dict, outdir: str):
     plt.close(fig)
 
 
-def plot_summary(sweep_df: pd.DataFrame, burst_df: pd.DataFrame,
+def plot_summary(sweep_rows: list[dict], burst_rows: list[dict],
                  conn_result: dict, reconnect_result: dict,
                  hdlc_result: dict, outdir: str):
     fig, axes = plt.subplots(2, 3, figsize=(15, 9))
@@ -459,10 +518,10 @@ def plot_summary(sweep_df: pd.DataFrame, burst_df: pd.DataFrame,
 
     # [0,1] latency boxplot
     ax = axes[0, 1]
-    if not sweep_df.empty:
-        delivered = sweep_df[sweep_df["delivered"] == True]
-        sizes = sorted(delivered["size"].unique())
-        data = [delivered[delivered["size"] == s]["latency_ms"].dropna().values for s in sizes]
+    if sweep_rows:
+        delivered = filter_rows(sweep_rows, delivered=True)
+        sizes = unique_values(delivered, "size")
+        data = [values(filter_rows(delivered, size=s), "latency_ms") for s in sizes]
         ax.boxplot(data, labels=[str(s) for s in sizes])
     ax.set_title("Latency by size")
     ax.set_xlabel("bytes")
@@ -470,12 +529,12 @@ def plot_summary(sweep_df: pd.DataFrame, burst_df: pd.DataFrame,
 
     # [0,2] throughput
     ax = axes[0, 2]
-    if not sweep_df.empty:
-        delivered = sweep_df[sweep_df["delivered"] == True]
-        sizes = sorted(delivered["size"].unique())
+    if sweep_rows:
+        delivered = filter_rows(sweep_rows, delivered=True)
+        sizes = unique_values(delivered, "size")
         throughputs = []
         for s in sizes:
-            sub = delivered[delivered["size"] == s]
+            sub = filter_rows(delivered, size=s)
             n = len(sub)
             kbps = (n * s / 1024) / (n * 0.05) if n > 0 else 0
             throughputs.append(kbps)
@@ -485,8 +544,8 @@ def plot_summary(sweep_df: pd.DataFrame, burst_df: pd.DataFrame,
 
     # [1,0] burst
     ax = axes[1, 0]
-    if not burst_df.empty:
-        ax.scatter(burst_df["t_relative_ms"], burst_df["seq"], s=8)
+    if burst_rows:
+        ax.scatter(values(burst_rows, "t_relative_ms"), values(burst_rows, "seq"), s=8)
     ax.set_title("Burst timeline")
     ax.set_xlabel("ms")
     ax.set_ylabel("seq")
@@ -520,7 +579,7 @@ def plot_summary(sweep_df: pd.DataFrame, burst_df: pd.DataFrame,
 # Report
 # ---------------------------------------------------------------------------
 
-def write_report(results: dict, sweep_df: pd.DataFrame, outdir: str):
+def write_report(results: dict, sweep_rows: list[dict], outdir: str):
     lines = ["# go-rns-pipe Benchmark Report", ""]
     lines.append(f"Generated: {time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime())}")
     lines.append("")
@@ -535,16 +594,16 @@ def write_report(results: dict, sweep_df: pd.DataFrame, outdir: str):
     lines.append("")
 
     lines.append("## 2. Packet Latency Sweep")
-    if not sweep_df.empty:
-        delivered = sweep_df[sweep_df["delivered"] == True]
-        for size in sorted(sweep_df["size"].unique()):
-            sub = delivered[delivered["size"] == size]["latency_ms"].dropna()
-            total = len(sweep_df[sweep_df["size"] == size])
+    if sweep_rows:
+        delivered = filter_rows(sweep_rows, delivered=True)
+        for size in unique_values(sweep_rows, "size"):
+            sub = values(filter_rows(delivered, size=size), "latency_ms")
+            total = len(filter_rows(sweep_rows, size=size))
             lines.append(f"### {size}B")
-            if len(sub) > 0:
+            if sub:
                 lines.append(f"- Delivered: {len(sub)}/{total}")
-                lines.append(f"- Median latency: {sub.median():.1f} ms")
-                lines.append(f"- p95 latency: {sub.quantile(0.95):.1f} ms")
+                lines.append(f"- Median latency: {median_or_nan(sub):.1f} ms")
+                lines.append(f"- p95 latency: {quantile(sub, 0.95):.1f} ms")
             else:
                 lines.append(f"- Delivered: 0/{total}")
             lines.append("")
@@ -646,13 +705,13 @@ def main():
     all_results["connectivity"] = conn_result
 
     # Test 2: Packet sweep
-    sweep_df = run_test_packet_sweep(reticulum, dest_hash_hex, sizes, args.packets)
-    sweep_df.to_csv(os.path.join(outdir, "raw.csv"), index=False)
-    all_results["sweep"] = {"rows": len(sweep_df)}
+    sweep_rows = run_test_packet_sweep(reticulum, dest_hash_hex, sizes, args.packets)
+    write_csv(sweep_rows, os.path.join(outdir, "raw.csv"), ["size", "latency_ms", "delivered"])
+    all_results["sweep"] = {"rows": len(sweep_rows)}
 
     # Test 3: Burst
-    burst_df = run_test_burst(reticulum, dest_hash_hex)
-    all_results["burst"] = {"packets_sent": len(burst_df)}
+    burst_rows = run_test_burst(reticulum, dest_hash_hex)
+    all_results["burst"] = {"packets_sent": len(burst_rows)}
 
     # Test 4: Reconnect
     reconnect_result = run_test_reconnect(reticulum, dest_hash_hex, docker=args.docker)
@@ -682,15 +741,15 @@ def main():
     all_results["hdlc_integrity"] = hdlc_result
 
     # Plots
-    if not args.no_plots:
+    if not args.no_plots and init_plotting():
         console.print("[bold]Generating plots...[/bold]")
-        plot_latency_by_size(sweep_df, outdir)
-        plot_throughput(sweep_df, outdir)
-        plot_cdf_latency(sweep_df, outdir)
-        plot_burst_timeline(burst_df, outdir)
+        plot_latency_by_size(sweep_rows, outdir)
+        plot_throughput(sweep_rows, outdir)
+        plot_cdf_latency(sweep_rows, outdir)
+        plot_burst_timeline(burst_rows, outdir)
         plot_reconnect_timeline(reconnect_result, outdir)
         plot_hdlc_integrity(hdlc_result, outdir)
-        plot_summary(sweep_df, burst_df, conn_result, reconnect_result, hdlc_result, outdir)
+        plot_summary(sweep_rows, burst_rows, conn_result, reconnect_result, hdlc_result, outdir)
         console.print("[green]Plots written.[/green]")
 
     # Rich summary table
@@ -701,11 +760,11 @@ def main():
     ms = conn_result.get("time_to_announce_ms")
     table.add_row("1. Connectivity", f"{ms:.0f} ms" if ms else "NOT FOUND")
 
-    delivered = sweep_df[sweep_df["delivered"] == True] if not sweep_df.empty else pd.DataFrame()
-    median_all = delivered["latency_ms"].median() if not delivered.empty else float("nan")
-    table.add_row("2. Packet sweep", f"median={median_all:.1f}ms, n={len(sweep_df)}")
+    delivered = filter_rows(sweep_rows, delivered=True)
+    median_all = median_or_nan(values(delivered, "latency_ms"))
+    table.add_row("2. Packet sweep", f"median={median_all:.1f}ms, n={len(sweep_rows)}")
 
-    table.add_row("3. Burst", f"{len(burst_df)} packets sent")
+    table.add_row("3. Burst", f"{len(burst_rows)} packets sent")
 
     dt = reconnect_result.get("downtime_s")
     table.add_row("4. Reconnect", f"{dt:.1f}s" if dt else "skipped")
@@ -716,7 +775,7 @@ def main():
     console.print(table)
 
     # Report
-    write_report(all_results, sweep_df, outdir)
+    write_report(all_results, sweep_rows, outdir)
 
     console.print(f"\n[bold green]Done. Results in {outdir}/[/bold green]")
 
