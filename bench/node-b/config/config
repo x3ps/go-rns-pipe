@@ -3,14 +3,8 @@
   loglevel = 4
 
 [interfaces]
-  [[TCP to node-a]]
-    type = TCPClientInterface
+  [[TCP Client]]
+    type = PipeInterface
     interface_enabled = Yes
-    target_host = rns-node-a
-    target_port = 4242
-
-  [[TCP Server]]
-    type = TCPServerInterface
-    interface_enabled = Yes
-    listen_ip = 0.0.0.0
-    listen_port = 4243
+    command = /bench/rns-tcp-iface --mode client --peer-addr rns-node-a:4242
+    respawn_delay = 2

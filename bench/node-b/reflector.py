@@ -41,5 +41,11 @@ destination.set_packet_callback(packet_callback)
 
 print("Reflector ready, waiting for packets...", flush=True)
 
+ANNOUNCE_INTERVAL = 12
+last_announce = time.time()
 while True:
     time.sleep(1)
+    if time.time() - last_announce >= ANNOUNCE_INTERVAL:
+        destination.announce()
+        last_announce = time.time()
+        print("Reflector re-announced", flush=True)

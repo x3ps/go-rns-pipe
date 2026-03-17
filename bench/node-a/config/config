@@ -3,14 +3,8 @@
   loglevel = 4
 
 [interfaces]
-  [[Pipe Bridge]]
+  [[TCP Bridge]]
     type = PipeInterface
     interface_enabled = Yes
-    command = /bench/pipe-bridge
+    command = /bench/rns-tcp-iface --mode server --listen-addr :4242
     respawn_delay = 2
-
-  [[TCP Server]]
-    type = TCPServerInterface
-    interface_enabled = Yes
-    listen_ip = 0.0.0.0
-    listen_port = 4242

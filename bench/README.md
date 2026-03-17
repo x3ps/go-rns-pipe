@@ -62,7 +62,7 @@ python bench/bench.py --docker --output bench/results
 | 1 | Connectivity | Measures time for the reflector destination to appear in the RNS routing table via announce propagation |
 | 2 | Packet sweep | Sends N packets at each configured size; records per-packet delivery and latency |
 | 3 | Burst | Sends 50 packets back-to-back; measures effective throughput |
-| 4 | Reconnect | Kills pipe-bridge inside node-a; measures time until rnsd respawns it (requires `--docker`) |
+| 4 | Reconnect | Kills rns-tcp-iface inside node-a via pkill; rnsd respawns it after respawn_delay=2s (requires `--docker`) |
 | 5 | HDLC integrity | Runs pipe-bridge in `--shim-mode`; injects valid, corrupted, truncated, and empty frames; counts decoded outputs |
 
 ## Output Files
@@ -84,15 +84,19 @@ report.md                # Markdown report with numeric results
 ## Flags
 
 ```
---node-a HOST:PORT   node-a TCP address (default: localhost:4242)
---node-b HOST:PORT   node-b TCP address (default: localhost:4243)
---packets N          packets per size in sweep (default: 500)
---sizes A,B,C        comma-separated payload sizes in bytes (default: 64,256,465,500)
---output DIR         output directory (default: ./results)
---no-plots           skip matplotlib plot generation
---skip-hdlc          skip HDLC integrity test
---docker             enable reconnect test (requires running Docker containers)
+--node-a HOST:PORT      node-a TCP address (default: localhost:4242)
+--packets N             packets per size in sweep (default: 500)
+--sizes A,B,C           comma-separated payload sizes in bytes (default: 64,256,465,500)
+--output DIR            output directory (default: ./results)
+--no-plots              skip matplotlib plot generation
+--skip-hdlc             skip HDLC integrity test
+--docker                auto-fetch reflector hash from Docker container and enable reconnect test
+--reflector-hash HEX    reflector destination hash (alternative to --docker for tests 1–3)
 ```
+
+Tests 1–3 (connectivity, packet sweep, burst) require either `--docker` (auto-fetches hash from
+the node-b container) or `--reflector-hash <hex>` (supply the hash directly). Without either flag,
+only Test 4 (reconnect, also skipped without `--docker`) and Test 5 (HDLC) run.
 
 ## Compliance Notes
 
@@ -120,8 +124,8 @@ report.md                # Markdown report with numeric results
 - bench.py uses a simplex send model (no reply path from reflector) because
   the RNS packet receipt confirmation (`PacketReceipt.DELIVERED`) confirms
   delivery to the next-hop, not to the final destination.
-- The reconnect test uses `pkill -f pipe-bridge` inside the container, which
-  also kills any concurrent pipe-bridge processes. Run `docker compose up -d`
+- The reconnect test uses `pkill -f rns-tcp-iface` inside the container, which
+  also kills any concurrent rns-tcp-iface processes. Run `docker compose up -d`
   first to ensure a clean state.
 - Docker Compose v1 (`docker-compose`) is not supported; use `docker compose`
   (v2) or set `COMPOSE_COMMAND` in your environment.
