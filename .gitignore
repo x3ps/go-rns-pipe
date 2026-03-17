@@ -16,3 +16,6 @@ vendor/
 # bench
 bench/pipe-bridge/pipe-bridge
 bench/results/
+bench/__pycache__/
+bench/tests/__pycache__/
+*.pyc
