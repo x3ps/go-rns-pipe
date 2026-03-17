@@ -24,7 +24,18 @@
         gomod2nixPkgs = gomod2nix.legacyPackages.${system};
       in
       {
-        packages.default = pkgs.buildGoModule {
+        packages.rns-tcp-iface = pkgs.buildGoModule {
+          pname = "rns-tcp-iface";
+          version = "0.0.0";
+          src = ./.;
+          modRoot = "examples/tcp";
+          vendorHash = null;
+          proxyVendor = true;
+        };
+
+        packages.default = self.packages.${system}.rns-tcp-iface;
+
+        packages.example = pkgs.buildGoModule {
           pname = "go-rns-pipe-tcp-example";
           version = "0.0.0";
           src = ./.;
@@ -44,6 +55,7 @@
             export CGO_ENABLED=0
             go test ./...
             go vet ./...
+            cd examples/tcp && go vet ./...
           '';
           installPhase = ''
             touch $out

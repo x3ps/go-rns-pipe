@@ -7,9 +7,14 @@ tasks:
       - nix develop
 
   build:
-    desc: Build the example binary
+    desc: Build rns-tcp-iface
     cmds:
       - nix build
+
+  build-tcp:
+    desc: Build rns-tcp-iface with go
+    cmds:
+      - cd examples/tcp && go build -o rns-tcp-iface .
 
   update:
     desc: Update gomod2nix.toml after changing dependencies
@@ -25,6 +30,12 @@ tasks:
     desc: Run tests
     cmds:
       - go test ./...
+
+  test-all:
+    desc: Run all tests including examples
+    cmds:
+      - go test ./...
+      - cd examples/tcp && go vet ./...
 
   check:
     desc: Run nix flake check
