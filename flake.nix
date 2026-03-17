@@ -35,9 +35,17 @@
           vendorHash = null;
         };
 
-        packages.default = self.packages.${system}.rns-tcp-iface;
+        packages.rns-udp-iface = pkgs.buildGoModule {
+          pname = "rns-udp-iface";
+          version = "0.0.0";
+          src = ./.;
+          modRoot = "examples/udp";
+          vendorHash = null;
+        };
 
-        checks.default = pkgs.stdenvNoCC.mkDerivation {
+        packages.default = self.packages.${system}.rns-udp-iface;
+
+        checks.default = pkgs.stdenv.mkDerivation {
           name = "go-rns-pipe-checks";
           src = ./.;
           nativeBuildInputs = [
@@ -58,6 +66,13 @@
 
             # TCP example module
             cd examples/tcp
+            go test ./...
+            go test -race ./...
+            go vet ./...
+            golangci-lint run
+
+            # UDP example module
+            cd ../udp
             go test ./...
             go test -race ./...
             go vet ./...

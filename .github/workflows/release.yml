@@ -29,6 +29,6 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload binary
-        run: gh release upload "${{ github.ref_name }}" ./result/bin/rns-tcp-iface
+        run: gh release upload "${{ github.ref_name }}" ./result/bin/rns-udp-iface
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
