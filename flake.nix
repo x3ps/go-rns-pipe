@@ -4,6 +4,9 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
+    # gomod2nix is NOT used for building (we use pkgs.buildGoModule).
+    # It is included solely to provide the `gomod2nix` CLI tool in devShell
+    # for updating gomod2nix.toml when dependencies change.
     gomod2nix = {
       url = "github:nix-community/gomod2nix";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -30,7 +33,6 @@
           src = ./.;
           modRoot = "examples/tcp";
           vendorHash = null;
-          proxyVendor = true;
         };
 
         packages.default = self.packages.${system}.rns-tcp-iface;
@@ -38,16 +40,28 @@
         checks.default = pkgs.stdenvNoCC.mkDerivation {
           name = "go-rns-pipe-checks";
           src = ./.;
-          nativeBuildInputs = [ pkgs.go ];
+          nativeBuildInputs = [
+            pkgs.go
+            pkgs.golangci-lint
+          ];
           doCheck = true;
           buildPhase = ''
             export HOME=$TMPDIR
             export GOPATH=$TMPDIR/go
             export GOCACHE=$TMPDIR/go-cache
-            export CGO_ENABLED=0
+            export GOLANGCI_LINT_CACHE=$TMPDIR/golangci-lint-cache
+            # Root module
             go test ./...
+            go test -race ./...
             go vet ./...
-            cd examples/tcp && go vet ./...
+            golangci-lint run
+
+            # TCP example module
+            cd examples/tcp
+            go test ./...
+            go test -race ./...
+            go vet ./...
+            golangci-lint run
           '';
           installPhase = ''
             touch $out
