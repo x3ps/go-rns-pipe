@@ -1,0 +1,16 @@
+[reticulum]
+  enable_transport = Yes
+  loglevel = 4
+
+[interfaces]
+  [[Pipe Bridge]]
+    type = PipeInterface
+    interface_enabled = Yes
+    command = /bench/pipe-bridge
+    respawn_delay = 2
+
+  [[TCP Server]]
+    type = TCPServerInterface
+    interface_enabled = Yes
+    listen_ip = 0.0.0.0
+    listen_port = 4242

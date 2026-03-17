@@ -1,0 +1,16 @@
+[reticulum]
+  enable_transport = Yes
+  loglevel = 4
+
+[interfaces]
+  [[TCP to node-a]]
+    type = TCPClientInterface
+    interface_enabled = Yes
+    target_host = rns-node-a
+    target_port = 4242
+
+  [[TCP Server]]
+    type = TCPServerInterface
+    interface_enabled = Yes
+    listen_ip = 0.0.0.0
+    listen_port = 4243
