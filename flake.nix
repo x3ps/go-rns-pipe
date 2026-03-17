@@ -4,7 +4,7 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
-    # gomod2nix is NOT used for building (we use pkgs.buildGoModule).
+    # gomod2nix is NOT used for building (we use pkgs.stdenv.mkDerivation).
     # It is included solely to provide the `gomod2nix` CLI tool in devShell
     # for updating gomod2nix.toml when dependencies change.
     gomod2nix = {
@@ -27,20 +27,38 @@
         gomod2nixPkgs = gomod2nix.legacyPackages.${system};
       in
       {
-        packages.rns-tcp-iface = pkgs.buildGoModule {
+        packages.rns-tcp-iface = pkgs.stdenv.mkDerivation {
           pname = "rns-tcp-iface";
           version = "0.0.0";
           src = ./.;
-          modRoot = "examples/tcp";
-          vendorHash = null;
+          nativeBuildInputs = [ pkgs.go ];
+          buildPhase = ''
+            export HOME=$TMPDIR
+            export GOPATH=$TMPDIR/go
+            export GOCACHE=$TMPDIR/go-cache
+            (cd examples/tcp && go build -o $TMPDIR/rns-tcp-iface .)
+          '';
+          installPhase = ''
+            mkdir -p $out/bin
+            cp $TMPDIR/rns-tcp-iface $out/bin/
+          '';
         };
 
-        packages.rns-udp-iface = pkgs.buildGoModule {
+        packages.rns-udp-iface = pkgs.stdenv.mkDerivation {
           pname = "rns-udp-iface";
           version = "0.0.0";
           src = ./.;
-          modRoot = "examples/udp";
-          vendorHash = null;
+          nativeBuildInputs = [ pkgs.go ];
+          buildPhase = ''
+            export HOME=$TMPDIR
+            export GOPATH=$TMPDIR/go
+            export GOCACHE=$TMPDIR/go-cache
+            (cd examples/udp && go build -o $TMPDIR/rns-udp-iface .)
+          '';
+          installPhase = ''
+            mkdir -p $out/bin
+            cp $TMPDIR/rns-udp-iface $out/bin/
+          '';
         };
 
         packages.default = self.packages.${system}.rns-udp-iface;
