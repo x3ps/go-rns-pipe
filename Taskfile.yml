@@ -1,0 +1,32 @@
+version: "3"
+
+tasks:
+  dev:
+    desc: Enter development shell
+    cmds:
+      - nix develop
+
+  build:
+    desc: Build the example binary
+    cmds:
+      - nix build
+
+  update:
+    desc: Update gomod2nix.toml after changing dependencies
+    cmds:
+      - gomod2nix
+
+  lint:
+    desc: Run linters
+    cmds:
+      - golangci-lint run
+
+  test:
+    desc: Run tests
+    cmds:
+      - go test ./...
+
+  check:
+    desc: Run nix flake check
+    cmds:
+      - nix flake check

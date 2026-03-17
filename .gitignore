@@ -1,0 +1,14 @@
+# Nix
+result
+result-*
+.direnv
+
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+vendor/
