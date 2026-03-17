@@ -11,9 +11,9 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6.0.2
 
-      - uses: cachix/install-nix-action@v31
+      - uses: cachix/install-nix-action@v31.10.1
         with:
           extra_nix_config: |
             experimental-features = nix-command flakes
