@@ -8,12 +8,13 @@ import (
 	"time"
 )
 
-// reconnector manages reconnection attempts with exponential backoff and jitter.
+// reconnector manages reconnection attempts with configurable backoff.
 // See: PipeInterface.py#L145-L156 — reconnect_pipe loop with respawn_delay
 type reconnector struct {
-	baseDelay   time.Duration
-	maxAttempts int // 0 = infinite
-	logger      *slog.Logger
+	baseDelay          time.Duration
+	maxAttempts        int // 0 = infinite
+	exponentialBackoff bool
+	logger             *slog.Logger
 }
 
 // run executes fn in a loop until fn returns nil (context cancelled) or ctx is
@@ -49,12 +50,16 @@ func (r *reconnector) run(ctx context.Context, fn func() error) error {
 	}
 }
 
-// backoff computes the delay for a given attempt using exponential backoff with
-// jitter. The first attempt (0) has no delay. Subsequent delays are capped at
-// 60 seconds.
+// backoff computes the delay for a given attempt. The first attempt (0) has no
+// delay. When exponentialBackoff is false (default), returns a fixed baseDelay
+// matching PipeInterface.py respawn_delay behavior. When exponentialBackoff is
+// true, uses exponential backoff with ±25% jitter capped at 60 seconds.
 func (r *reconnector) backoff(attempt int) time.Duration {
 	if attempt == 0 {
 		return 0
+	}
+	if !r.exponentialBackoff {
+		return r.baseDelay // Fixed delay: matches PipeInterface.py respawn_delay
 	}
 	const maxDelay = 60 * time.Second
 	exp := math.Pow(2, float64(attempt-1))

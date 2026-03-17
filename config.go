@@ -58,6 +58,11 @@ type Config struct {
 	// ReceiveBufferSize is the capacity of the internal packet channel.
 	// Defaults to 64.
 	ReceiveBufferSize int
+
+	// ExponentialBackoff enables exponential backoff with jitter on reconnect
+	// attempts. Default false uses a fixed delay equal to ReconnectDelay on every
+	// attempt, matching PipeInterface.py respawn_delay behavior.
+	ExponentialBackoff bool
 }
 
 // DefaultConfig returns a Config with sensible defaults matching the Python

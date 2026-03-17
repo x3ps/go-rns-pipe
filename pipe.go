@@ -126,9 +126,10 @@ func (iface *Interface) Start(ctx context.Context) error {
 	}()
 
 	recon := &reconnector{
-		baseDelay:   iface.config.ReconnectDelay,
-		maxAttempts: iface.config.MaxReconnectAttempts,
-		logger:      iface.logger,
+		baseDelay:          iface.config.ReconnectDelay,
+		maxAttempts:        iface.config.MaxReconnectAttempts,
+		exponentialBackoff: iface.config.ExponentialBackoff,
+		logger:             iface.logger,
 	}
 
 	return recon.run(ctx, func() error {
@@ -237,10 +238,16 @@ func (iface *Interface) Receive(packet []byte) error {
 	frame := iface.encoder.Encode(packet)
 
 	iface.mu.Lock()
-	_, err := iface.config.Stdout.Write(frame)
+	n, err := iface.config.Stdout.Write(frame)
 	iface.mu.Unlock()
 
-	return err
+	if err != nil {
+		return err
+	}
+	if n != len(frame) {
+		return io.ErrShortWrite
+	}
+	return nil
 }
 
 // IsOnline returns whether the interface is currently online.

@@ -76,12 +76,15 @@ func TestHDLCEmptyPacket(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Empty payload produces no packet (decoder skips zero-length buffers).
+	// Empty payload (FLAG+FLAG) should deliver an empty packet, matching Python
+	// upstream which calls process_incoming(data_buffer) unconditionally.
 	select {
 	case pkt := <-dec.Packets():
-		t.Fatalf("expected no packet, got %x", pkt)
+		if len(pkt) != 0 {
+			t.Fatalf("expected empty packet, got %x", pkt)
+		}
 	case <-time.After(50 * time.Millisecond):
-		// expected
+		t.Fatal("expected empty packet from FLAG+FLAG frame")
 	}
 }
 
@@ -354,7 +357,7 @@ func TestEOFTriggersReconnect(t *testing.T) {
 	if _, err := stdinW.Write(enc.Encode(payload)); err != nil {
 		t.Fatalf("write frame: %v", err)
 	}
-	stdinW.Close()
+	_ = stdinW.Close()
 
 	select {
 	case err := <-done:
@@ -448,7 +451,7 @@ func TestCallbackRaceDetector(t *testing.T) {
 // Run with -race to confirm no data race on the decoder after Start returns.
 func TestShutdownNoGoroutineLeak(t *testing.T) {
 	stdinR, stdinW := io.Pipe()
-	defer stdinW.Close()
+	defer func() { _ = stdinW.Close() }()
 	var stdout bytes.Buffer
 
 	iface := New(Config{
@@ -516,6 +519,44 @@ func TestRestartAfterStop(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("second Start did not return")
 	}
+}
+
+// TestReceiveShortWrite verifies that Receive returns io.ErrShortWrite when
+// the underlying writer accepts fewer bytes than provided (matching Python's
+// IOError check in process_outgoing).
+func TestReceiveShortWrite(t *testing.T) {
+	stdinR, _ := io.Pipe()
+
+	iface := New(Config{
+		Stdin:  stdinR,
+		Stdout: &shortWriter{},
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() { done <- iface.Start(ctx) }()
+
+	time.Sleep(50 * time.Millisecond)
+
+	err := iface.Receive([]byte("test"))
+	if !errors.Is(err, io.ErrShortWrite) {
+		t.Fatalf("expected io.ErrShortWrite, got %v", err)
+	}
+
+	cancel()
+	<-done
+}
+
+// shortWriter always reports writing one fewer byte than provided, with no error.
+type shortWriter struct{}
+
+func (w *shortWriter) Write(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+	return len(p) - 1, nil
 }
 
 // syncWriter is a thread-safe bytes.Buffer for concurrent writes.

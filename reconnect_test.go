@@ -9,8 +9,22 @@ import (
 
 func newTestReconnector(base time.Duration) *reconnector {
 	return &reconnector{
-		baseDelay: base,
-		logger:    slog.New(slog.NewTextHandler(io.Discard, nil)),
+		baseDelay:          base,
+		exponentialBackoff: true,
+		logger:             slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+}
+
+func TestBackoffFixedDelay(t *testing.T) {
+	r := &reconnector{
+		baseDelay:          5 * time.Second,
+		exponentialBackoff: false,
+		logger:             slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+	for attempt := 1; attempt <= 5; attempt++ {
+		if got := r.backoff(attempt); got != 5*time.Second {
+			t.Errorf("backoff(%d) = %v, want 5s", attempt, got)
+		}
 	}
 }
 

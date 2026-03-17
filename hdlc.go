@@ -71,19 +71,18 @@ func NewDecoder(hwMTU, chanSize int) *Decoder {
 func (d *Decoder) Write(b []byte) (int, error) {
 	for _, byte_ := range b {
 		if d.inFrame && byte_ == HDLCFlag {
-			// End of frame — deliver the packet
+			// End of frame — deliver the packet (even if empty, matching Python upstream
+			// which calls process_incoming(data_buffer) unconditionally).
 			// See: PipeInterface.py#L121-L123
 			d.escape = false
 			d.inFrame = false
-			if len(d.buf) > 0 {
-				pkt := make([]byte, len(d.buf))
-				copy(pkt, d.buf)
-				select {
-				case d.packets <- pkt:
-				default:
-					// Channel full — drop packet
-					d.dropped.Add(1)
-				}
+			pkt := make([]byte, len(d.buf))
+			copy(pkt, d.buf)
+			select {
+			case d.packets <- pkt:
+			default:
+				// Channel full — drop packet
+				d.dropped.Add(1)
 			}
 			d.buf = d.buf[:0]
 		} else if byte_ == HDLCFlag {
