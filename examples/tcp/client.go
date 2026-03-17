@@ -152,13 +152,13 @@ func backoff(base time.Duration, attempt int) time.Duration {
 	if attempt == 0 {
 		return 0
 	}
-	maxDelay := 60 * time.Second
+	const maxDelay = 60 * time.Second
 	exp := math.Pow(2, float64(attempt-1))
-	delay := time.Duration(float64(base) * exp)
-	if delay > maxDelay {
-		delay = maxDelay
+	delayF := float64(base) * exp
+	if delayF > float64(maxDelay) {
+		delayF = float64(maxDelay)
 	}
 	// ±25% jitter
-	jitter := time.Duration(float64(delay) * (0.75 + rand.Float64()*0.5))
+	jitter := time.Duration(delayF * (0.75 + rand.Float64()*0.5))
 	return jitter
 }
