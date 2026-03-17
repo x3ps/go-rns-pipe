@@ -42,10 +42,11 @@ func main() {
 
 	// Create pipe interface connected to rnsd via stdin/stdout.
 	iface := rnspipe.New(rnspipe.Config{
-		Name:   cfg.Name,
-		MTU:    cfg.MTU,
-		Stdin:  os.Stdin,
-		Stdout: os.Stdout,
+		Name:     cfg.Name,
+		MTU:      cfg.MTU,
+		LogLevel: cfg.LogLevel,
+		Stdin:    os.Stdin,
+		Stdout:   os.Stdout,
 	})
 
 	iface.OnStatus(func(online bool) {

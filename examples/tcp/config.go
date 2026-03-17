@@ -115,5 +115,8 @@ func (c Config) Validate() error {
 	if c.Mode == "client" && c.PeerAddr == "" {
 		return fmt.Errorf("--peer-addr is required in client mode")
 	}
+	if c.Mode == "client" && c.ReconnectDelay <= 0 {
+		return fmt.Errorf("--reconnect-delay must be positive, got %v", c.ReconnectDelay)
+	}
 	return nil
 }
