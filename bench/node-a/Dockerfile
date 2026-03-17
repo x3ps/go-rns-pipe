@@ -8,4 +8,4 @@ RUN pip install --no-cache-dir rns==1.1.4
 COPY --from=builder /pipe-bridge /bench/pipe-bridge
 RUN mkdir -p /root/.reticulum
 COPY bench/node-a/config/config /root/.reticulum/config
-CMD ["rnsd", "--console"]
+CMD ["rnsd"]
