@@ -1,6 +1,8 @@
 # Build outputs
 rns-tcp-iface
 rns-udp-iface
+examples/tcp/tcp
+examples/udp/udp
 
 # Go
 *.exe

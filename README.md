@@ -8,6 +8,11 @@ Pipeline primitives for RNS data processing.
 - [Docker](https://www.docker.com/) or [Podman](https://podman.io/) (for E2E tests)
 - [golangci-lint](https://golangci-lint.run/) (for linting)
 
+Or use the Nix development shell (requires [Nix with flakes](https://nixos.wiki/wiki/Flakes)):
+```bash
+nix develop   # provides go, golangci-lint, docker-compose, python + rns venv
+```
+
 ## Quick Start
 
 ```bash
