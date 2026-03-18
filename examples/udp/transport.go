@@ -39,15 +39,14 @@ func NewTransport(cfg Config, logger *slog.Logger) *Transport {
 // Step 7: UDP socket loop (reconnects on socket error).
 // Step 8: Return pipe interface error.
 func (t *Transport) Start(ctx context.Context) error {
-	// Step 1: Resolve ListenAddr and PeerAddr — fail fast on bad config.
+	// Step 1: Resolve local listen address only — fail fast on bad config.
+	// peerAddr is resolved lazily inside the socket loop to tolerate transient
+	// DNS failures (e.g., peer container not yet started in Docker).
 	listenAddr, err := net.ResolveUDPAddr("udp", t.config.ListenAddr)
 	if err != nil {
 		return err
 	}
-	peerAddr, err := net.ResolveUDPAddr("udp", t.config.PeerAddr)
-	if err != nil {
-		return err
-	}
+	var peerAddr *net.UDPAddr
 
 	// Step 2: Create rnspipe.Interface connected to rnsd via stdin/stdout.
 	iface := rnspipe.New(rnspipe.Config{
@@ -117,7 +116,23 @@ func (t *Transport) Start(ctx context.Context) error {
 
 	// Step 7: UDP socket loop — reopens the socket on error until ctx is done.
 	for {
-		// Step 7a: Open UDP socket with SO_BROADCAST enabled.
+		// Step 7a: Resolve peer address — retries each iteration to tolerate
+		// DNS not being ready at startup (peer container may not exist yet).
+		newPeer, resolveErr := net.ResolveUDPAddr("udp", t.config.PeerAddr)
+		if resolveErr != nil {
+			t.logger.Warn("peer address not yet resolvable, retrying",
+				"addr", t.config.PeerAddr, "err", resolveErr)
+			select {
+			case <-ctx.Done():
+				break
+			case <-time.After(2 * time.Second):
+				continue
+			}
+			break
+		}
+		peerAddr = newPeer
+
+		// Step 7b: Open UDP socket with SO_BROADCAST enabled.
 		newConn, openErr := openUDPConn(listenAddr)
 		if openErr != nil {
 			t.logger.Error("failed to open UDP socket", "err", openErr)
@@ -130,16 +145,16 @@ func (t *Transport) Start(ctx context.Context) error {
 			break
 		}
 
-		// Step 7b: Publish the new socket so OnSend can use it.
+		// Step 7c: Publish the new socket so OnSend can use it.
 		connMu.Lock()
 		conn = newConn
 		connMu.Unlock()
 
-		// Step 7c: Read UDP datagrams and forward to rnsd via iface.Receive.
+		// Step 7d: Read UDP datagrams and forward to rnsd via iface.Receive.
 		// Accepts from all peers — no source-IP filter, matching UDPInterface.py.
 		readErr := t.readLoop(ctx, newConn, iface)
 
-		// Step 7d: Tear down current socket; decide whether to reopen.
+		// Step 7e: Tear down current socket; decide whether to reopen.
 		oldConn := newConn
 		connMu.Lock()
 		conn = nil
