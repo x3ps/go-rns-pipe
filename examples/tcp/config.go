@@ -27,9 +27,6 @@ type Config struct {
 	// MTU is the RNS packet MTU.
 	MTU int
 
-	// PipePath is unused but reserved for future subprocess spawning.
-	PipePath string
-
 	// ReconnectDelay is the base delay between client reconnection attempts.
 	ReconnectDelay time.Duration
 

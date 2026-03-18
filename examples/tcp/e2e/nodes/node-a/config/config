@@ -1,0 +1,16 @@
+[reticulum]
+  enable_transport = Yes
+  loglevel = 4
+
+[interfaces]
+  [[TCP Bridge]]
+    type = PipeInterface
+    interface_enabled = Yes
+    command = /app/rns-tcp-iface --mode server --listen-addr :4244
+    respawn_delay = 2
+
+  [[Test Client Interface]]
+    type = TCPServerInterface
+    interface_enabled = yes
+    listen_ip = 0.0.0.0
+    listen_port = 4243

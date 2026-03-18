@@ -57,9 +57,5 @@ Add to your `~/.reticulum/config`:
 ## Building
 
 ```sh
-# With Nix
-nix build .#rns-tcp-iface
-
-# With Go
 cd examples/tcp && go build -o rns-tcp-iface .
 ```

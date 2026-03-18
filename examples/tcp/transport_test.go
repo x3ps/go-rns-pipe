@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"io"
 	"net"
 	"testing"
 	"time"
@@ -41,6 +42,26 @@ func loopbackConn(t *testing.T) (server, client net.Conn) {
 	return server, client
 }
 
+// shortWriteConn is a net.Conn stub that returns a partial write with no error.
+type shortWriteConn struct {
+	net.Conn
+	written int
+}
+
+func (c *shortWriteConn) Write(b []byte) (int, error)        { return c.written, nil }
+func (c *shortWriteConn) SetWriteDeadline(time.Time) error   { return nil }
+
+// TestWritePacketShortWrite verifies that writePacket returns io.ErrShortWrite
+// when the underlying conn.Write returns n < len(frame) with no error.
+func TestWritePacketShortWrite(t *testing.T) {
+	conn := &shortWriteConn{written: 0}
+	var enc rnspipe.Encoder
+	err := writePacket(conn, &enc, []byte{0x01, 0x02, 0x03})
+	if err != io.ErrShortWrite {
+		t.Fatalf("expected io.ErrShortWrite, got %v", err)
+	}
+}
+
 // TestReadPacketsCancelClean verifies that cancelling ctx causes readPackets to
 // close the connection, wait for the inner io.Copy goroutine, and return promptly.
 func TestReadPacketsCancelClean(t *testing.T) {
@@ -65,6 +86,45 @@ func TestReadPacketsCancelClean(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("timeout: readPackets did not return after context cancel — goroutine likely leaked")
 	}
+}
+
+// TestReadPacketsLargePacket is a regression test verifying that readPackets
+// decodes a packet close to tcpHWMTU without truncation.
+// Prior bug: iface.HWMTU() (1064) was passed, silently truncating TCP packets
+// larger than 1064 bytes received from Python TCPInterface peers.
+func TestReadPacketsLargePacket(t *testing.T) {
+	server, client := loopbackConn(t)
+
+	const payloadSize = tcpHWMTU - 64
+	payload := make([]byte, payloadSize)
+	for i := range payload {
+		payload[i] = byte(i & 0xFF)
+	}
+
+	packets := make(chan []byte, 4)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- readPackets(ctx, server, tcpHWMTU, packets)
+	}()
+
+	var enc rnspipe.Encoder
+	if _, err := client.Write(enc.Encode(payload)); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	_ = client.Close()
+
+	select {
+	case pkt := <-packets:
+		if len(pkt) != payloadSize {
+			t.Fatalf("expected %d bytes, got %d (packet truncated)", payloadSize, len(pkt))
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("timeout waiting for large packet")
+	}
+	<-done
 }
 
 // TestReadPacketsChannelFull verifies that cancelling ctx does not deadlock when

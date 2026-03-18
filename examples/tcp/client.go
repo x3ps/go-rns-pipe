@@ -92,7 +92,7 @@ func runClient(ctx context.Context, cfg Config, iface *rnspipe.Interface, logger
 		readCtx, readCancel := context.WithCancel(ctx)
 		readDone := make(chan error, 1)
 		go func() {
-			readDone <- readPackets(readCtx, conn, iface.HWMTU(), packets)
+			readDone <- readPackets(readCtx, conn, tcpHWMTU, packets)
 		}()
 
 	loop:

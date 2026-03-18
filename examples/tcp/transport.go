@@ -9,9 +9,18 @@ import (
 	rnspipe "github.com/x3ps/go-rns-pipe"
 )
 
-// writeDeadline is the timeout for writing a single packet to a TCP connection.
-// Prevents slow or stalled clients from blocking the sender.
-const writeDeadline = 5 * time.Second
+const (
+	// writeDeadline is the timeout for writing a single packet to a TCP connection.
+	// Prevents slow or stalled clients from blocking the sender.
+	writeDeadline = 5 * time.Second
+
+	// tcpHWMTU is the maximum HDLC frame size accepted from a TCP peer.
+	// Matches TCPInterface.py HW_MTU = 262144 so packets up to that size
+	// are decoded correctly. Intentionally larger than the pipe-side HWMTU
+	// (1064, PipeInterface.py), which governs rnsd ↔ rns-tcp-iface only.
+	// See: RNS/Interfaces/TCPInterface.py — class TCPInterface: HW_MTU = 262144
+	tcpHWMTU = 262144
+)
 
 // writePacket HDLC-encodes a packet and writes it to a TCP connection.
 // A write deadline is set to prevent slow clients from blocking indefinitely.
@@ -20,8 +29,14 @@ func writePacket(conn net.Conn, enc *rnspipe.Encoder, packet []byte) error {
 	if err := conn.SetWriteDeadline(time.Now().Add(writeDeadline)); err != nil {
 		return err
 	}
-	_, err := conn.Write(frame)
-	return err
+	n, err := conn.Write(frame)
+	if err != nil {
+		return err
+	}
+	if n != len(frame) {
+		return io.ErrShortWrite
+	}
+	return nil
 }
 
 // readPackets reads from a TCP connection, HDLC-decodes the stream, and sends

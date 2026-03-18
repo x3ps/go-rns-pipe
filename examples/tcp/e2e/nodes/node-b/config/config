@@ -1,0 +1,10 @@
+[reticulum]
+  enable_transport = Yes
+  loglevel = 4
+
+[interfaces]
+  [[TCP Client]]
+    type = PipeInterface
+    interface_enabled = Yes
+    command = /app/rns-tcp-iface --mode client --peer-addr node-a:4244 --reconnect-delay 2s
+    respawn_delay = 2
