@@ -68,18 +68,18 @@ def on_link_established(link):
 
     channel = link.get_channel()
     channel.register_message_type(EchoMessage)
+
+    def on_channel_message(message):
+        print(f"Channel message received: {len(message.data)}B", flush=True)
+        response = EchoMessage(message.data)
+        channel.send(response)
+
     channel.add_message_handler(on_channel_message)
 
     link.set_resource_strategy(RNS.Link.ACCEPT_ALL)
     link.set_resource_concluded_callback(on_resource_concluded)
 
     link.set_link_closed_callback(on_link_closed)
-
-
-def on_channel_message(message):
-    print(f"Channel message received: {len(message.data)}B", flush=True)
-    response = EchoMessage(message.data)
-    message.link.get_channel().send(response)
 
 
 def on_resource_concluded(resource):

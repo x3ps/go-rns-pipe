@@ -5,12 +5,10 @@ resource transfers require more round-trips. Timeouts are increased accordingly:
 - 1MB: 240s (vs 180s for TCP)
 """
 
-import io
-
 import pytest
 import RNS
 
-from conftest import wait_until
+from conftest import ensure_has_path, wait_until
 
 pytestmark = pytest.mark.e2e
 
@@ -19,13 +17,7 @@ def _establish_link(reflector_hashes):
     """Establish a link to the reflector's link destination."""
     dest_hash = bytes.fromhex(reflector_hashes["link_dest_hash"])
 
-    if not RNS.Transport.has_path(dest_hash):
-        RNS.Transport.request_path(dest_hash)
-        wait_until(
-            lambda: RNS.Transport.has_path(dest_hash),
-            timeout=30,
-            desc="path to link destination",
-        )
+    ensure_has_path(dest_hash)
 
     remote_identity = RNS.Identity.recall(dest_hash)
     if remote_identity is None:
@@ -53,7 +45,7 @@ def _establish_link(reflector_hashes):
 
 def _transfer_resource(link, data, timeout):
     """Send data as a resource over the link and wait for completion."""
-    resource = RNS.Resource(io.BytesIO(data), link)
+    resource = RNS.Resource(data, link)
     wait_until(
         lambda: resource.status >= RNS.Resource.COMPLETE,
         timeout=timeout,
