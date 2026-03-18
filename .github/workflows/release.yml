@@ -10,15 +10,15 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
 
       - name: Root — test
         run: make test-root
       - name: Root — lint
-        uses: golangci/golangci-lint-action@v7
+        uses: golangci/golangci-lint-action@v9
         with:
           version: latest
 
@@ -26,7 +26,7 @@ jobs:
         run: go test ./... && go test -race ./...
         working-directory: examples/tcp
       - name: TCP — lint
-        uses: golangci/golangci-lint-action@v7
+        uses: golangci/golangci-lint-action@v9
         with:
           version: latest
           working-directory: examples/tcp
@@ -35,7 +35,7 @@ jobs:
         run: go test ./... && go test -race ./...
         working-directory: examples/udp
       - name: UDP — lint
-        uses: golangci/golangci-lint-action@v7
+        uses: golangci/golangci-lint-action@v9
         with:
           version: latest
           working-directory: examples/udp
@@ -49,8 +49,8 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
 
