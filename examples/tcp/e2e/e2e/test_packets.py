@@ -7,7 +7,7 @@ import time
 import pytest
 import RNS
 
-from conftest import wait_until
+from conftest import ensure_has_path, wait_until
 
 pytestmark = pytest.mark.e2e
 
@@ -16,13 +16,7 @@ def _resolve_destination(reflector_hashes):
     """Resolve the outbound packet destination."""
     dest_hash = bytes.fromhex(reflector_hashes["dest_hash"])
 
-    if not RNS.Transport.has_path(dest_hash):
-        RNS.Transport.request_path(dest_hash)
-        wait_until(
-            lambda: RNS.Transport.has_path(dest_hash),
-            timeout=30,
-            desc="path to reflector",
-        )
+    ensure_has_path(dest_hash)
 
     remote_identity = RNS.Identity.recall(dest_hash)
     if remote_identity is None:
