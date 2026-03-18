@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"io"
+	"log/slog"
 	"net"
 	"testing"
 	"time"
@@ -125,6 +126,50 @@ func TestReadPacketsLargePacket(t *testing.T) {
 		t.Fatal("timeout waiting for large packet")
 	}
 	<-done
+}
+
+// TestSetTCPSocketOptions validates the socket options code path doesn't panic
+// on a real connection.
+func TestSetTCPSocketOptions(t *testing.T) {
+	server, client := loopbackConn(t)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	setTCPSocketOptions(client.(*net.TCPConn), logger)  // must not panic
+	setTCPSocketOptions(server.(*net.TCPConn), logger)
+}
+
+// TestMalformedShortFrame verifies that a truncated HDLC frame (FLAG byte but no
+// closing FLAG) is silently discarded: no packet is emitted and no panic occurs.
+func TestMalformedShortFrame(t *testing.T) {
+	server, client := loopbackConn(t)
+
+	packets := make(chan []byte, 4)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- readPackets(ctx, server, tcpHWMTU, packets)
+	}()
+
+	// Write a FLAG start byte followed by payload bytes but no closing FLAG.
+	truncated := []byte{rnspipe.HDLCFlag, 0x01, 0x02, 0x03}
+	if _, err := client.Write(truncated); err != nil {
+		t.Fatalf("write truncated frame: %v", err)
+	}
+	_ = client.Close() // EOF — causes readPackets to return
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for readPackets to return")
+	}
+
+	// No packet should have been emitted.
+	select {
+	case pkt := <-packets:
+		t.Fatalf("unexpected packet from truncated frame: %x", pkt)
+	default:
+	}
 }
 
 // TestReadPacketsChannelFull verifies that cancelling ctx does not deadlock when

@@ -52,8 +52,13 @@ func (p *connPool) count() int {
 
 // broadcast writes an HDLC-encoded packet to all connected clients.
 // Failed writes cause the connection to be removed from the pool.
-// See: TCPInterface.py — server spawns per-client handlers; since we have a
-// single pipe to rnsd, outbound packets must be broadcast to all TCP clients.
+//
+// Architecture note: upstream TCPServerInterface.py spawns a separate
+// TCPClientInterface (separate rnsd interface registration) per accepted client.
+// That is not reproducible here: this process has a single stdin/stdout pipe to
+// rnsd — one RNS interface for the whole process. Broadcasting to all TCP
+// clients is the correct behaviour for this single-pipe design; it is not a bug.
+// Inbound traffic (client → rnsd via iface.Receive) remains per-connection.
 func (p *connPool) broadcast(packet []byte) error {
 	p.mu.RLock()
 	// Snapshot connections under read lock.
@@ -89,7 +94,7 @@ func (p *connPool) closeAll() {
 // runServer listens for incoming TCP connections and bridges each client to the
 // pipe interface. Packets from rnsd are broadcast to all connected clients.
 // See: TCPInterface.py — TCPServerInterface accept loop
-func runServer(ctx context.Context, cfg Config, iface *rnspipe.Interface, logger *slog.Logger) error {
+func runServer(ctx context.Context, cfg Config, iface *rnspipe.Interface, logger *slog.Logger, ready chan struct{}) error {
 	pool := newConnPool(logger)
 	defer pool.closeAll()
 
@@ -97,6 +102,7 @@ func runServer(ctx context.Context, cfg Config, iface *rnspipe.Interface, logger
 	iface.OnSend(func(pkt []byte) error {
 		return pool.broadcast(pkt)
 	})
+	close(ready) // signal: OnSend is registered, safe to start reading stdin
 
 	lc := net.ListenConfig{}
 	ln, err := lc.Listen(ctx, "tcp", cfg.ListenAddr)
@@ -123,9 +129,9 @@ func runServer(ctx context.Context, cfg Config, iface *rnspipe.Interface, logger
 			continue
 		}
 
-		// See: TCPInterface.py — TCP_NODELAY enabled
+		// See: TCPInterface.py — TCP_NODELAY, SO_KEEPALIVE, TCP_USER_TIMEOUT
 		if tc, ok := conn.(*net.TCPConn); ok {
-			_ = tc.SetNoDelay(true)
+			setTCPSocketOptions(tc, logger)
 		}
 
 		pool.add(conn)

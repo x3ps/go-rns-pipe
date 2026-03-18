@@ -3,8 +3,6 @@ package main
 import (
 	"context"
 	"log/slog"
-	"math"
-	"math/rand/v2"
 	"net"
 	"sync"
 	"time"
@@ -21,12 +19,12 @@ type clientConn struct {
 }
 
 // send HDLC-encodes and writes a packet to the active connection.
-// Returns nil (dropping the packet) if no connection is active.
+// Returns ErrOffline if no connection is active.
 func (c *clientConn) send(packet []byte) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.conn == nil {
-		return nil
+		return rnspipe.ErrOffline
 	}
 	return writePacket(c.conn, &c.enc, packet)
 }
@@ -51,7 +49,7 @@ func (c *clientConn) close() {
 // runClient connects to cfg.PeerAddr and bridges TCP traffic to the pipe
 // interface. It reconnects with exponential backoff on disconnection.
 // See: TCPInterface.py — TCPClientInterface connect/reconnect logic
-func runClient(ctx context.Context, cfg Config, iface *rnspipe.Interface, logger *slog.Logger) error {
+func runClient(ctx context.Context, cfg Config, iface *rnspipe.Interface, logger *slog.Logger, ready chan struct{}) error {
 	cc := &clientConn{}
 	defer cc.close()
 
@@ -60,6 +58,7 @@ func runClient(ctx context.Context, cfg Config, iface *rnspipe.Interface, logger
 	iface.OnSend(func(pkt []byte) error {
 		return cc.send(pkt)
 	})
+	close(ready) // signal: OnSend is registered, safe to start reading stdin
 
 	attempt := 0
 	for {
@@ -78,9 +77,9 @@ func runClient(ctx context.Context, cfg Config, iface *rnspipe.Interface, logger
 			continue
 		}
 
-		// See: TCPInterface.py — TCP_NODELAY enabled for low latency
+		// See: TCPInterface.py — TCP_NODELAY, SO_KEEPALIVE, TCP_USER_TIMEOUT
 		if tc, ok := conn.(*net.TCPConn); ok {
-			_ = tc.SetNoDelay(true)
+			setTCPSocketOptions(tc, logger)
 		}
 
 		logger.Info("connected to peer", "addr", cfg.PeerAddr)
@@ -146,19 +145,11 @@ func sleepBackoff(ctx context.Context, base time.Duration, attempt int) error {
 	}
 }
 
-// backoff computes exponential backoff with ±25% jitter, capped at 60s.
-// attempt=0 returns 0 (no delay on first try). Matches reconnect.go formula.
+// backoff returns 0 for the first attempt and base for all subsequent attempts.
+// Fixed delay matching TCPInterface.py RECONNECT_WAIT = 5.
 func backoff(base time.Duration, attempt int) time.Duration {
 	if attempt == 0 {
 		return 0
 	}
-	const maxDelay = 60 * time.Second
-	exp := math.Pow(2, float64(attempt-1))
-	delayF := float64(base) * exp
-	if delayF > float64(maxDelay) {
-		delayF = float64(maxDelay)
-	}
-	// ±25% jitter
-	jitter := time.Duration(delayF * (0.75 + rand.Float64()*0.5))
-	return jitter
+	return base
 }

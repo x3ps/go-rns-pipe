@@ -38,6 +38,22 @@ make build
 └── .github/workflows/   # CI and release pipelines
 ```
 
+## Architecture Notes
+
+### TCP server broadcast semantics
+
+Upstream `TCPServerInterface.py` spawns a separate `TCPClientInterface` (a distinct rnsd interface
+registration) for each accepted TCP client. This process has a single stdin/stdout pipe to rnsd —
+one RNS interface for the whole process — so broadcasting to all connected TCP clients is the
+correct behaviour. Inbound traffic (client → rnsd via `iface.Receive`) remains per-connection.
+
+### Remaining behavioural differences from official Reticulum
+
+| Area | Difference |
+|---|---|
+| TCP_KEEPINTVL | Go stdlib sets same value as KEEPIDLE (5s); Python sets interval=2s |
+| UDP multicast | Not implemented (only broadcast); matches Python UDPInterface.py |
+
 ## Contributing
 
 1. Make changes

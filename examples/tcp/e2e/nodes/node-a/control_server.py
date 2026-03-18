@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Tiny HTTP control server for killing/checking rns-tcp-iface."""
 
+import socket
 import subprocess
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
@@ -20,8 +21,14 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/check-iface":
-            rc = subprocess.call(["pgrep", "-f", IFACE_PATTERN])
-            code = 200 if rc == 0 else 404
+            # Use a TCP connect probe to :4244 instead of pgrep.
+            # This is zombie-immune: a zombie process holds no open sockets,
+            # so connect() fails immediately when the server is not running.
+            try:
+                with socket.create_connection(("localhost", 4244), timeout=2):
+                    code = 200
+            except OSError:
+                code = 404
             self.send_response(code)
             self.end_headers()
         else:

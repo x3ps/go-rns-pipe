@@ -8,7 +8,7 @@ services:
       dockerfile: examples/tcp/e2e/nodes/node-a/Dockerfile
     healthcheck:
       test: ["CMD", "sh", "-c",
-             "python3 -c \"import socket; socket.create_connection(('localhost',4243),timeout=2)\" && pgrep -f rns-tcp-iface > /dev/null"]
+             "python3 -c \"import socket; socket.create_connection(('localhost',4243),timeout=2)\" && python3 -c \"import socket; socket.create_connection(('localhost',4244),timeout=2)\""]
       interval: 5s
       timeout: 3s
       retries: 12

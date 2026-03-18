@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"io"
+	"log/slog"
 	"net"
 	"time"
 
@@ -37,6 +38,24 @@ func writePacket(conn net.Conn, enc *rnspipe.Encoder, packet []byte) error {
 		return io.ErrShortWrite
 	}
 	return nil
+}
+
+// setTCPSocketOptions applies socket options matching TCPInterface.py:
+// TCP_NODELAY, SO_KEEPALIVE, TCP_KEEPIDLE=5s (SetKeepAlivePeriod); on Linux
+// also sets TCP_KEEPINTVL=2s, TCP_KEEPCNT=12, TCP_USER_TIMEOUT=24s —
+// matching TCPInterface.py standard config.
+func setTCPSocketOptions(conn *net.TCPConn, logger *slog.Logger) {
+	if err := conn.SetNoDelay(true); err != nil {
+		logger.Warn("TCP_NODELAY failed", "error", err)
+	}
+	if err := conn.SetKeepAlive(true); err != nil {
+		logger.Warn("SO_KEEPALIVE failed", "error", err)
+	}
+	// Sets TCP_KEEPIDLE to 5s (TCPInterface.py: keepalive_idle=5).
+	if err := conn.SetKeepAlivePeriod(5 * time.Second); err != nil {
+		logger.Warn("TCP keep-alive period failed", "error", err)
+	}
+	setTCPPlatformOptions(conn, logger) // platform-specific
 }
 
 // readPackets reads from a TCP connection, HDLC-decodes the stream, and sends

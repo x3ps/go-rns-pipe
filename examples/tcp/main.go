@@ -1,5 +1,6 @@
-// rns-tcp-iface is a TCP transport for Reticulum, equivalent to Python RNS's
-// TCPClientInterface and TCPServerInterface.
+// rns-tcp-iface is a TCP transport for Reticulum, compatible with the protocol
+// of Python RNS's TCPClientInterface and TCPServerInterface (see architecture
+// note in README for server-side differences).
 //
 // It bridges HDLC-framed traffic between a pipe to rnsd (stdin/stdout) and
 // one or more TCP connections, using the same HDLC framing on both sides:
@@ -10,7 +11,7 @@
 //   - Framing: HDLC (FLAG=0x7E, ESC=0x7D, ESC_MASK=0x20) — same as PipeInterface
 //   - No handshake: connection is immediate, raw HDLC on connect
 //   - TCP_NODELAY: enabled for low-latency packet delivery
-//   - Client: reconnects with exponential backoff on disconnect
+//   - Client: reconnects with fixed 5s delay on disconnect (matches RECONNECT_WAIT)
 //   - Server: accepts multiple clients; broadcasts pipe→TCP to all
 //
 // This differs from PipeInterface in that the TCP side requires its own HDLC
@@ -20,6 +21,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -42,11 +44,12 @@ func main() {
 
 	// Create pipe interface connected to rnsd via stdin/stdout.
 	iface := rnspipe.New(rnspipe.Config{
-		Name:     cfg.Name,
-		MTU:      cfg.MTU,
-		LogLevel: cfg.LogLevel,
-		Stdin:    os.Stdin,
-		Stdout:   os.Stdout,
+		Name:      cfg.Name,
+		MTU:       cfg.MTU,
+		LogLevel:  cfg.LogLevel,
+		Stdin:     os.Stdin,
+		Stdout:    os.Stdout,
+		ExitOnEOF: true,
 	})
 
 	iface.OnStatus(func(online bool) {
@@ -64,16 +67,23 @@ func main() {
 	// First error triggers shutdown of both.
 	errc := make(chan error, 2)
 
-	go func() { errc <- iface.Start(ctx) }()
+	// ready is closed by the transport goroutine after OnSend is registered.
+	// iface.Start must not begin reading stdin until OnSend is set, otherwise
+	// packets arriving early are silently dropped (pipe.go cb == nil check).
+	ready := make(chan struct{})
 
 	go func() {
 		switch cfg.Mode {
 		case "client":
-			errc <- runClient(ctx, cfg, iface, logger)
+			errc <- runClient(ctx, cfg, iface, logger, ready)
 		case "server":
-			errc <- runServer(ctx, cfg, iface, logger)
+			errc <- runServer(ctx, cfg, iface, logger, ready)
 		}
 	}()
+
+	<-ready // OnSend is registered; safe to start reading stdin
+
+	go func() { errc <- iface.Start(ctx) }()
 
 	// Wait for first error.
 	err := <-errc
@@ -83,6 +93,10 @@ func main() {
 	<-errc
 
 	if err != nil && ctxErr == nil {
+		if errors.Is(err, rnspipe.ErrPipeClosed) {
+			logger.Info("pipe closed by rnsd, exiting for respawn")
+			os.Exit(0)
+		}
 		logger.Error("fatal error", "error", err)
 		os.Exit(1)
 	}
