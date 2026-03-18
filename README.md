@@ -1,47 +1,134 @@
 # go-rns-pipe
 
-Pipeline primitives for RNS data processing.
+[![CI](https://github.com/x3ps/go-rns-pipe/actions/workflows/ci.yml/badge.svg)](https://github.com/x3ps/go-rns-pipe/actions/workflows/ci.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/x3ps/go-rns-pipe.svg)](https://pkg.go.dev/github.com/x3ps/go-rns-pipe)
+[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
 
-## Requirements
+Go implementation of the [Reticulum](https://reticulum.network/) PipeInterface protocol.
+Provides HDLC-framed I/O over any `io.Reader`/`io.Writer` pair, wire-compatible
+with Python [`PipeInterface.py`](https://github.com/markqvist/Reticulum/blob/master/RNS/Interfaces/PipeInterface.py).
 
-- [Go](https://go.dev/) 1.24+
-- [Docker](https://www.docker.com/) or [Podman](https://podman.io/) (for E2E tests)
-- [golangci-lint](https://golangci-lint.run/) (for linting)
+## Installation
 
-Or use the Nix development shell (requires [Nix with flakes](https://nixos.wiki/wiki/Flakes)):
 ```bash
-nix develop   # provides go, golangci-lint, docker-compose, python + rns venv
+go get github.com/x3ps/go-rns-pipe
 ```
 
 ## Quick Start
 
-```bash
-# Run tests
-make test
+```go
+package main
 
-# Lint
-make lint
+import (
+    "context"
+    "log"
+    "os/signal"
+    "syscall"
 
-# Build packaged binaries
-make build
+    rnspipe "github.com/x3ps/go-rns-pipe"
+)
+
+func main() {
+    ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+    defer stop()
+
+    iface := rnspipe.New(rnspipe.Config{
+        Name:      "MyPipe",
+        ExitOnEOF: true, // exit when rnsd closes the pipe
+    })
+
+    // Packets decoded from stdin (from rnsd) arrive here.
+    iface.OnSend(func(pkt []byte) error {
+        log.Printf("received %d bytes from rnsd", len(pkt))
+        return nil
+    })
+
+    iface.OnStatus(func(online bool) {
+        log.Printf("interface online: %v", online)
+    })
+
+    // Inject a packet toward rnsd (HDLC-encoded to stdout).
+    // iface.Receive(packet)
+
+    if err := iface.Start(ctx); err != nil {
+        log.Fatal(err)
+    }
+}
 ```
 
-## Project Structure
+## API Overview
 
+### Interface Methods
+
+| Method | Signature | Description |
+|---|---|---|
+| `New` | `New(Config) *Interface` | Create an interface with defaults applied |
+| `Start` | `Start(ctx) error` | Block reading HDLC frames from Stdin; reconnects on failure |
+| `Receive` | `Receive([]byte) error` | HDLC-encode a packet and write it to Stdout (toward rnsd) |
+| `OnSend` | `OnSend(func([]byte) error)` | Register callback for packets decoded from Stdin |
+| `OnStatus` | `OnStatus(func(bool))` | Register callback for online/offline transitions |
+| `IsOnline` | `IsOnline() bool` | Whether the interface is currently online |
+| `Name` | `Name() string` | Interface name |
+| `MTU` | `MTU() int` | Configured MTU |
+| `HWMTU` | `HWMTU() int` | Configured hardware MTU |
+
+### Configuration
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `Name` | `string` | `"PipeInterface"` | Interface name for RNS logs |
+| `MTU` | `int` | `500` | RNS on-wire MTU in bytes |
+| `HWMTU` | `int` | `1064` | Hardware MTU for HDLC buffer sizing |
+| `ReconnectDelay` | `time.Duration` | `5s` | Base delay before reconnect attempts |
+| `MaxReconnectAttempts` | `int` | `0` (infinite) | Max reconnection attempts; 0 = unlimited |
+| `ExponentialBackoff` | `bool` | `false` | Use exponential backoff with jitter (capped at 60s) |
+| `ExitOnEOF` | `bool` | `false` | Return `ErrPipeClosed` on clean EOF instead of reconnecting |
+| `ReceiveBufferSize` | `int` | `64` | Internal decoded-packet channel capacity |
+| `LogLevel` | `slog.Level` | `INFO` | Log verbosity |
+| `Logger` | `*slog.Logger` | `nil` (auto) | Custom structured logger |
+| `Stdin` | `io.Reader` | `os.Stdin` | Source of HDLC-framed packets from rnsd |
+| `Stdout` | `io.Writer` | `os.Stdout` | Destination for HDLC-framed packets to rnsd |
+
+### HDLC Encoder/Decoder
+
+The `Encoder` and `Decoder` are available for building custom transports:
+
+- **`Encoder.Encode([]byte) []byte`** — wrap a packet in HDLC framing (FLAG + escaped data + FLAG)
+- **`NewDecoder(hwMTU, chanSize) *Decoder`** — create a streaming decoder
+- **`Decoder.Write([]byte) (int, error)`** — feed raw bytes (implements `io.Writer` for use with `io.Copy`)
+- **`Decoder.Packets() <-chan []byte`** — channel of decoded packets
+- **`Decoder.Close()`** — close the packets channel
+- **`Decoder.DroppedPackets() uint64`** — count of packets dropped due to full channel
+
+### Errors
+
+| Error | Description |
+|---|---|
+| `ErrNotStarted` | Operation attempted before `Start` |
+| `ErrAlreadyStarted` | `Start` called on a running interface |
+| `ErrMaxReconnectAttemptsReached` | All reconnect attempts exhausted |
+| `ErrOffline` | `Receive` called while interface is offline (e.g. during reconnect) |
+| `ErrPipeClosed` | Clean EOF with `ExitOnEOF=true`; rnsd closed the pipe |
+
+## rnsd Integration
+
+Add a `PipeInterface` section to `~/.reticulum/config`:
+
+```ini
+[interfaces]
+  [[My Go Pipe]]
+    type = PipeInterface
+    interface_enabled = Yes
+    command = /path/to/your-binary
+    respawn_delay = 5
 ```
-.
-├── config.go            # Config struct and defaults
-├── errors.go            # Exported error values
-├── hdlc.go              # HDLC encoder/decoder
-├── pipe.go              # Interface implementation
-├── pipe_test.go         # Tests
-├── reconnect.go         # Reconnection with exponential backoff
-├── examples/
-│   ├── tcp/             # rns-tcp-iface example transport + tests
-│   └── udp/             # rns-udp-iface example transport + tests
-├── Makefile             # Build, test, and lint targets
-└── .github/workflows/   # CI and release pipelines
-```
+
+The binary communicates with rnsd over stdin/stdout using HDLC framing.
+
+## Examples
+
+- **[examples/tcp/](examples/tcp/README.md)** — TCP transport with client/server modes, keepalive tuning, and reconnect logic. Equivalent to Python `TCPClientInterface`/`TCPServerInterface`.
+- **[examples/udp/](examples/udp/README.md)** — Minimal UDP transport with broadcast support. Equivalent to Python `UDPInterface`.
 
 ## Architecture Notes
 
@@ -50,19 +137,40 @@ make build
 Upstream `TCPServerInterface.py` spawns a separate `TCPClientInterface` (a distinct rnsd interface
 registration) for each accepted TCP client. This process has a single stdin/stdout pipe to rnsd —
 one RNS interface for the whole process — so broadcasting to all connected TCP clients is the
-correct behaviour. Inbound traffic (client → rnsd via `iface.Receive`) remains per-connection.
+correct behaviour. Inbound traffic (client -> rnsd via `iface.Receive`) remains per-connection.
 
 ### Remaining behavioural differences from official Reticulum
 
 | Area | Difference |
 |---|---|
-| TCP_KEEPINTVL | Go stdlib sets same value as KEEPIDLE (5s); Python sets interval=2s |
-| UDP multicast | Not implemented (only broadcast); matches Python UDPInterface.py |
+| TCP keepalive tuning | Non-Linux platforms lack `TCP_KEEPINTVL`, `TCP_KEEPCNT`, and `TCP_USER_TIMEOUT` tuning (no-op stub in `transport_other.go`); Linux matches Python exactly |
+| UDP multicast | Not implemented (only broadcast); matches Python `UDPInterface.py` |
 
-## Contributing
+## Development
 
-1. Make changes
-2. Run `make test`
-3. Run `make lint`
-4. Run `make e2e` when a container runtime is available (or `make e2e-tcp` / `make e2e-udp` individually)
-5. Open a PR
+### Requirements
+
+- [Go](https://go.dev/) 1.24+
+- [Docker](https://www.docker.com/) or [Podman](https://podman.io/) (for E2E tests)
+- [golangci-lint](https://golangci-lint.run/) (for linting)
+
+Or use the Nix development shell:
+
+```bash
+nix develop   # provides go, golangci-lint, docker-compose, python + rns venv
+```
+
+### Make targets
+
+| Target | Description |
+|---|---|
+| `make test` | Run unit tests (includes race detector) |
+| `make lint` | Run `go vet` and `golangci-lint` |
+| `make build` | Build `rns-tcp-iface` and `rns-udp-iface` binaries |
+| `make e2e` | Run all E2E tests (requires container runtime) |
+| `make e2e-tcp` | Run TCP E2E tests only |
+| `make e2e-udp` | Run UDP E2E tests only |
+
+## License
+
+[AGPL-3.0](LICENSE)
