@@ -1,7 +1,6 @@
-# Nix
-result
-result-*
-.direnv
+# Build outputs
+rns-tcp-iface
+rns-udp-iface
 
 # Go
 *.exe
@@ -13,9 +12,15 @@ result-*
 *.out
 vendor/
 
-# bench
-bench/pipe-bridge/pipe-bridge
-bench/results/
-bench/__pycache__/
-bench/tests/__pycache__/
+# tests
+.venv*/
+venv/
+.pytest_cache/
+coverage.out
+.coverage
+htmlcov/
+__pycache__/
 *.pyc
+
+# local tools
+.claude/

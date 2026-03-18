@@ -5,24 +5,42 @@ on:
     branches: [main]
   pull_request:
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   check:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write   # OIDC / FlakeHub cache
     steps:
-      - uses: actions/checkout@v6.0.2
-
-      - uses: cachix/install-nix-action@v31.10.1
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
         with:
-          extra_nix_config: |
-            experimental-features = nix-command flakes
+          go-version-file: go.mod
 
-      - uses: DeterminateSystems/magic-nix-cache-action@v13
+      - name: Root — test
+        run: make test-root
+      - name: Root — lint
+        uses: golangci/golangci-lint-action@v7
+        with:
+          version: latest
 
-      - name: Flake check
-        run: nix flake check
+      - name: TCP — test
+        run: go test ./... && go test -race ./...
+        working-directory: examples/tcp
+      - name: TCP — lint
+        uses: golangci/golangci-lint-action@v7
+        with:
+          version: latest
+          working-directory: examples/tcp
 
-      - name: Build
-        run: nix build
+      - name: UDP — test
+        run: go test ./... && go test -race ./...
+        working-directory: examples/udp
+      - name: UDP — lint
+        uses: golangci/golangci-lint-action@v7
+        with:
+          version: latest
+          working-directory: examples/udp
