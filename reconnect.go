@@ -2,6 +2,7 @@ package rnspipe
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"math"
 	"math/rand/v2"
@@ -40,6 +41,9 @@ func (r *reconnector) run(ctx context.Context, fn func() error) error {
 		}
 
 		if err := fn(); err != nil {
+			if errors.Is(err, ErrPipeClosed) {
+				return err // terminal: don't retry
+			}
 			r.logger.Warn("reconnect failed", "attempt", attempt+1, "error", err)
 			attempt++
 			continue

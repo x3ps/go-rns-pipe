@@ -53,7 +53,6 @@ func New(config Config) *Interface {
 	}
 	config.MTU = orDefault(config.MTU, defaults.MTU)
 	config.HWMTU = orDefault(config.HWMTU, defaults.HWMTU)
-	config.Bitrate = orDefault(config.Bitrate, defaults.Bitrate)
 	config.ReconnectDelay = orDefaultDuration(config.ReconnectDelay, defaults.ReconnectDelay)
 	config.ReceiveBufferSize = orDefault(config.ReceiveBufferSize, defaults.ReceiveBufferSize)
 
@@ -171,7 +170,12 @@ func (iface *Interface) readLoop(ctx context.Context) error {
 				iface.logger.Warn("packets dropped during read", "count", dropped)
 			}
 			if err == nil {
-				// Clean EOF: remote closed the pipe. Signal reconnect.
+				// Clean EOF: remote closed the pipe.
+				if iface.config.ExitOnEOF {
+					// Signal terminal exit — caller (rnsd) will respawn.
+					return ErrPipeClosed
+				}
+				// Signal reconnect.
 				return io.EOF
 			}
 			return err
@@ -219,10 +223,14 @@ func (iface *Interface) drainPackets(decoder *Decoder) {
 func (iface *Interface) Receive(packet []byte) error {
 	iface.mu.RLock()
 	started := iface.started
+	online := iface.online
 	iface.mu.RUnlock()
 
 	if !started {
 		return ErrNotStarted
+	}
+	if !online {
+		return ErrOffline
 	}
 
 	frame := iface.encoder.Encode(packet)

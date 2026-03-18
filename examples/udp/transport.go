@@ -50,9 +50,10 @@ func (t *Transport) Start(ctx context.Context) error {
 
 	// Step 2: Create rnspipe.Interface connected to rnsd via stdin/stdout.
 	iface := rnspipe.New(rnspipe.Config{
-		Name:     t.config.Name,
-		MTU:      t.config.MTU,
-		LogLevel: t.config.LogLevel,
+		Name:      t.config.Name,
+		MTU:       t.config.MTU,
+		LogLevel:  t.config.LogLevel,
+		ExitOnEOF: true,
 	})
 
 	// Step 3: Register status callback — log online/offline transitions.

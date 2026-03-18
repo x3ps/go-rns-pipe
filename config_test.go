@@ -20,7 +20,6 @@ func TestDefaultConfig(t *testing.T) {
 		{"Name", d.Name, "PipeInterface"},
 		{"MTU", d.MTU, 500},
 		{"HWMTU", d.HWMTU, 1064},
-		{"Bitrate", d.Bitrate, 1_000_000},
 		{"ReconnectDelay", d.ReconnectDelay, 5 * time.Second},
 		{"ReceiveBufferSize", d.ReceiveBufferSize, 64},
 	}
@@ -53,12 +52,6 @@ func TestNewClampsNegativeValues(t *testing.T) {
 			cfg:  Config{HWMTU: -99},
 			get:  func(i *Interface) int { return i.HWMTU() },
 			want: defaults.HWMTU,
-		},
-		{
-			name: "Bitrate",
-			cfg:  Config{Bitrate: -5},
-			get:  func(i *Interface) int { return i.config.Bitrate },
-			want: defaults.Bitrate,
 		},
 		{
 			name: "ReconnectDelay",
@@ -100,9 +93,6 @@ func TestNewAppliesDefaults(t *testing.T) {
 	if iface.config.HWMTU != defaults.HWMTU {
 		t.Errorf("HWMTU = %d, want %d", iface.config.HWMTU, defaults.HWMTU)
 	}
-	if iface.config.Bitrate != defaults.Bitrate {
-		t.Errorf("Bitrate = %d, want %d", iface.config.Bitrate, defaults.Bitrate)
-	}
 	if iface.config.ReconnectDelay != defaults.ReconnectDelay {
 		t.Errorf("ReconnectDelay = %v, want %v", iface.config.ReconnectDelay, defaults.ReconnectDelay)
 	}
@@ -118,7 +108,6 @@ func TestNewPreservesExplicitValues(t *testing.T) {
 		Name:              "custom",
 		MTU:               1200,
 		HWMTU:             2048,
-		Bitrate:           500_000,
 		ReconnectDelay:    10 * time.Second,
 		ReceiveBufferSize: 128,
 	}
@@ -133,9 +122,6 @@ func TestNewPreservesExplicitValues(t *testing.T) {
 	}
 	if iface.config.HWMTU != 2048 {
 		t.Errorf("HWMTU = %d, want 2048", iface.config.HWMTU)
-	}
-	if iface.config.Bitrate != 500_000 {
-		t.Errorf("Bitrate = %d, want 500000", iface.config.Bitrate)
 	}
 	if iface.config.ReconnectDelay != 10*time.Second {
 		t.Errorf("ReconnectDelay = %v, want 10s", iface.config.ReconnectDelay)

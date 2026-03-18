@@ -217,6 +217,51 @@ func TestReceiveOnStopped(t *testing.T) {
 	}
 }
 
+// TestReceiveWhileOffline verifies that Receive returns ErrOffline when
+// started=true but online=false (i.e. during the reconnect backoff window).
+func TestReceiveWhileOffline(t *testing.T) {
+	stdinR, stdinW := io.Pipe()
+	var stdout bytes.Buffer
+
+	iface := New(Config{
+		Stdin:                stdinR,
+		Stdout:               &stdout,
+		ReconnectDelay:       200 * time.Millisecond,
+		MaxReconnectAttempts: 2,
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() { done <- iface.Start(ctx) }()
+	waitOnline(t, iface)
+
+	// Trigger EOF → interface goes offline, reconnector waits 200ms
+	_ = stdinW.Close()
+
+	deadline := time.After(2 * time.Second)
+	for iface.IsOnline() {
+		select {
+		case <-deadline:
+			t.Fatal("timeout waiting for interface to go offline")
+		default:
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+
+	if err := iface.Receive([]byte("test")); !errors.Is(err, ErrOffline) {
+		t.Fatalf("expected ErrOffline while offline, got %v", err)
+	}
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout")
+	}
+}
+
 func TestConcurrentReceive(t *testing.T) {
 	stdinR, _ := io.Pipe()
 	var stdout syncWriter
@@ -382,6 +427,40 @@ func TestEOFTriggersReconnect(t *testing.T) {
 
 	if iface.IsOnline() {
 		t.Fatal("expected interface offline after stop")
+	}
+}
+
+// TestExitOnEOFTerminates verifies that ExitOnEOF=true causes Start to return
+// ErrPipeClosed on clean stdin EOF without entering any reconnect delay.
+func TestExitOnEOFTerminates(t *testing.T) {
+	stdinR, stdinW := io.Pipe()
+	var stdout bytes.Buffer
+
+	iface := New(Config{
+		Stdin:          stdinR,
+		Stdout:         &stdout,
+		ExitOnEOF:      true,
+		ReconnectDelay: 10 * time.Second, // large delay — must not be reached
+	})
+
+	done := make(chan error, 1)
+	go func() { done <- iface.Start(context.Background()) }()
+	waitOnline(t, iface)
+
+	start := time.Now()
+	_ = stdinW.Close() // clean EOF
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, ErrPipeClosed) {
+			t.Fatalf("expected ErrPipeClosed, got %v", err)
+		}
+		// Must return before reconnect delay fires — verify no retry occurred.
+		if elapsed := time.Since(start); elapsed > 2*time.Second {
+			t.Fatalf("took too long (%v); reconnect was attempted", elapsed)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout: Start did not return after EOF with ExitOnEOF=true")
 	}
 }
 

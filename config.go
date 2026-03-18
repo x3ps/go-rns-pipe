@@ -20,11 +20,6 @@ type Config struct {
 	// See: PipeInterface.py#L72 — self.HWMTU = 1064
 	HWMTU int
 
-	// Bitrate in bits/s. Defaults to 1000000 (1 Mbps), matching
-	// PipeInterface.BITRATE_GUESS.
-	// See: PipeInterface.py#L48 — BITRATE_GUESS = 1*1000*1000
-	Bitrate int
-
 	// ReconnectDelay is the base delay before attempting to reconnect after
 	// a pipe failure. Defaults to 5s, matching PipeInterface respawn_delay.
 	// See: PipeInterface.py#L67 — respawn_delay default = 5
@@ -63,6 +58,12 @@ type Config struct {
 	// attempts. Default false uses a fixed delay equal to ReconnectDelay on every
 	// attempt, matching PipeInterface.py respawn_delay behavior.
 	ExponentialBackoff bool
+
+	// ExitOnEOF causes Start to return ErrPipeClosed on a clean stdin EOF
+	// instead of attempting reconnection. Set this when running as a child
+	// process spawned by rnsd so the process exits and rnsd can respawn it
+	// via respawn_delay, rather than looping indefinitely.
+	ExitOnEOF bool
 }
 
 // DefaultConfig returns a Config with sensible defaults matching the Python
@@ -72,7 +73,6 @@ func DefaultConfig() Config {
 		Name:              "PipeInterface",
 		MTU:               500,  // See: understanding.html — physical layer MTU of 500 bytes
 		HWMTU:             1064, // See: PipeInterface.py#L72 — self.HWMTU = 1064
-		Bitrate:           1_000_000,
 		ReconnectDelay:    5 * time.Second,
 		ReceiveBufferSize: 64,
 	}

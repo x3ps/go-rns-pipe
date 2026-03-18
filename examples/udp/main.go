@@ -18,10 +18,13 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
+
+	rnspipe "github.com/x3ps/go-rns-pipe"
 )
 
 func main() {
@@ -36,6 +39,10 @@ func main() {
 
 	t := NewTransport(cfg, logger)
 	if err := t.Start(ctx); err != nil && ctx.Err() == nil {
+		if errors.Is(err, rnspipe.ErrPipeClosed) {
+			logger.Info("pipe closed by rnsd, exiting for respawn")
+			os.Exit(0)
+		}
 		logger.Error("transport error", "err", err)
 		os.Exit(1)
 	}
