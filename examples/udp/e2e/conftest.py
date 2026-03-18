@@ -67,11 +67,10 @@ def reflector_hashes():
     return hashes
 
 
-@pytest.fixture
-def rns_client(tmp_path):
-    """Start RNS instance via TCPClientInterface to node-a:4343. Fresh per test."""
-    config_dir = tmp_path / "rns-config"
-    config_dir.mkdir()
+@pytest.fixture(scope="session")
+def rns_client(tmp_path_factory):
+    """Start RNS instance via TCPClientInterface to node-a:4343."""
+    config_dir = tmp_path_factory.mktemp("rns-config")
 
     config_path = config_dir / "config"
     config_path.write_text("""[reticulum]
