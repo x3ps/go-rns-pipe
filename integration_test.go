@@ -13,6 +13,20 @@ import (
 	"time"
 )
 
+// waitOnline polls until iface.IsOnline() returns true or the deadline expires.
+func waitOnline(t *testing.T, iface *Interface) {
+	t.Helper()
+	deadline := time.After(2 * time.Second)
+	for !iface.IsOnline() {
+		select {
+		case <-deadline:
+			t.Fatal("timeout waiting for online")
+		default:
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+}
+
 // newTestPipe creates an Interface wired to io.Pipe pairs for testing.
 // Returns the interface, the writer end of stdin (to inject data), and
 // the reader end of stdout (to read outbound frames).
@@ -58,16 +72,7 @@ func TestOnSendCallbackError(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- iface.Start(ctx) }()
 
-	// Wait for online.
-	deadline := time.After(2 * time.Second)
-	for !iface.IsOnline() {
-		select {
-		case <-deadline:
-			t.Fatal("timeout waiting for online")
-		default:
-			time.Sleep(5 * time.Millisecond)
-		}
-	}
+	waitOnline(t, iface)
 
 	// Send two frames — both should invoke the callback despite errors.
 	enc := &Encoder{}
@@ -78,7 +83,7 @@ func TestOnSendCallbackError(t *testing.T) {
 	}
 
 	// Wait for both callbacks.
-	deadline = time.After(2 * time.Second)
+	deadline := time.After(2 * time.Second)
 	for callCount.Load() < 2 {
 		select {
 		case <-deadline:
@@ -179,15 +184,7 @@ func TestDrainPacketsDeliversToCallback(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- iface.Start(context.Background()) }()
 
-	deadline := time.After(2 * time.Second)
-	for !iface.IsOnline() {
-		select {
-		case <-deadline:
-			t.Fatal("timeout waiting for online")
-		default:
-			time.Sleep(5 * time.Millisecond)
-		}
-	}
+	waitOnline(t, iface)
 
 	// Write a frame and immediately close stdin to trigger drainPackets.
 	enc := &Encoder{}
@@ -290,15 +287,7 @@ func TestNonCloserStdin(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- iface.Start(ctx) }()
 
-	deadline := time.After(2 * time.Second)
-	for !iface.IsOnline() {
-		select {
-		case <-deadline:
-			t.Fatal("timeout waiting for online")
-		default:
-			time.Sleep(5 * time.Millisecond)
-		}
-	}
+	waitOnline(t, iface)
 
 	cancel()
 
@@ -332,16 +321,7 @@ func TestOnStatusTransitions(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- iface.Start(ctx) }()
 
-	// Wait for online.
-	deadline := time.After(2 * time.Second)
-	for !iface.IsOnline() {
-		select {
-		case <-deadline:
-			t.Fatal("timeout waiting for online")
-		default:
-			time.Sleep(5 * time.Millisecond)
-		}
-	}
+	waitOnline(t, iface)
 
 	cancel()
 	_ = stdinW.Close()
@@ -397,15 +377,7 @@ func TestFullRoundTrip(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- iface.Start(ctx) }()
 
-	deadline := time.After(2 * time.Second)
-	for !iface.IsOnline() {
-		select {
-		case <-deadline:
-			t.Fatal("timeout waiting for online")
-		default:
-			time.Sleep(5 * time.Millisecond)
-		}
-	}
+	waitOnline(t, iface)
 
 	// Read outbound frames in background.
 	go func() {
@@ -476,15 +448,7 @@ func TestFullRoundTripConcurrent(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- iface.Start(ctx) }()
 
-	deadline := time.After(2 * time.Second)
-	for !iface.IsOnline() {
-		select {
-		case <-deadline:
-			t.Fatal("timeout waiting for online")
-		default:
-			time.Sleep(5 * time.Millisecond)
-		}
-	}
+	waitOnline(t, iface)
 
 	// Drain stdout in background.
 	go func() {

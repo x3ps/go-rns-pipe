@@ -236,6 +236,65 @@ func TestDecoderMalformedEscape(t *testing.T) {
 	}
 }
 
+func TestDecoderTruncatedFrameNoOutput(t *testing.T) {
+	t.Parallel()
+
+	dec := NewDecoder(1064, 1)
+	defer dec.Close()
+	if _, err := dec.Write([]byte{HDLCFlag, 0x01, 0x02}); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+
+	select {
+	case pkt := <-dec.Packets():
+		t.Fatalf("unexpected packet from truncated frame: %x", pkt)
+	case <-time.After(50 * time.Millisecond):
+	}
+}
+
+func TestDecoderMixedCorruptTruncatedEmpty(t *testing.T) {
+	t.Parallel()
+
+	enc := &Encoder{}
+	validFrame := enc.Encode([]byte{0x01, 0x02, 0x03, 0x04})
+
+	corruptedFrame := append([]byte(nil), validFrame...)
+	corruptedFrame[2] ^= 0xFF
+
+	truncatedFrame := []byte{HDLCFlag, 0x01, 0x02}
+	emptyFrame := []byte{HDLCFlag, HDLCFlag}
+	stream := append(append(append(corruptedFrame, truncatedFrame...), emptyFrame...), validFrame...)
+
+	dec := NewDecoder(1064, 4)
+	defer dec.Close()
+	if _, err := dec.Write(stream); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+
+	want := [][]byte{
+		{0x01, 0xFD, 0x03, 0x04},
+		{0x01, 0x02},
+		{},
+	}
+
+	for i, expected := range want {
+		select {
+		case pkt := <-dec.Packets():
+			if !bytes.Equal(pkt, expected) {
+				t.Fatalf("packet %d: got %x, want %x", i, pkt, expected)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("timeout waiting for packet %d", i)
+		}
+	}
+
+	select {
+	case pkt := <-dec.Packets():
+		t.Fatalf("unexpected extra packet: %x", pkt)
+	case <-time.After(50 * time.Millisecond):
+	}
+}
+
 func TestDecoderDoubleClose(t *testing.T) {
 	t.Parallel()
 

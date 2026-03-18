@@ -103,11 +103,7 @@ func TestInterfaceStartStop(t *testing.T) {
 		done <- iface.Start(ctx)
 	}()
 
-	// Give it a moment to start.
-	time.Sleep(50 * time.Millisecond)
-	if !iface.IsOnline() {
-		t.Fatal("expected online after start")
-	}
+	waitOnline(t, iface)
 
 	cancel()
 	_ = stdinW.Close()
@@ -138,12 +134,12 @@ func TestReceiveSend(t *testing.T) {
 	})
 
 	// Capture packets decoded from stdin.
-	var received [][]byte
-	var mu sync.Mutex
+	gotPacket := make(chan []byte, 1)
 	iface.OnSend(func(pkt []byte) error {
-		mu.Lock()
-		received = append(received, pkt)
-		mu.Unlock()
+		select {
+		case gotPacket <- append([]byte(nil), pkt...):
+		default:
+		}
 		return nil
 	})
 
@@ -155,8 +151,7 @@ func TestReceiveSend(t *testing.T) {
 		done <- iface.Start(ctx)
 	}()
 
-	// Wait for online.
-	time.Sleep(50 * time.Millisecond)
+	waitOnline(t, iface)
 
 	// Test outbound: Receive() should write HDLC frame to stdout.
 	outPayload := []byte("outbound packet")
@@ -200,12 +195,14 @@ func TestReceiveSend(t *testing.T) {
 	}
 
 	// Wait for callback.
-	time.Sleep(100 * time.Millisecond)
-	mu.Lock()
-	if len(received) != 1 || !bytes.Equal(received[0], inPayload) {
-		t.Fatalf("inbound: got %v, want [%x]", received, inPayload)
+	select {
+	case pkt := <-gotPacket:
+		if !bytes.Equal(pkt, inPayload) {
+			t.Fatalf("inbound: got %x, want %x", pkt, inPayload)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for inbound packet callback")
 	}
-	mu.Unlock()
 
 	cancel()
 	_ = stdinW.Close()
@@ -237,7 +234,7 @@ func TestConcurrentReceive(t *testing.T) {
 		done <- iface.Start(ctx)
 	}()
 
-	time.Sleep(50 * time.Millisecond)
+	waitOnline(t, iface)
 
 	// Fire concurrent Receive calls.
 	var wg sync.WaitGroup
@@ -302,7 +299,7 @@ func TestAlreadyStarted(t *testing.T) {
 		done <- iface.Start(ctx)
 	}()
 
-	time.Sleep(50 * time.Millisecond)
+	waitOnline(t, iface)
 
 	if err := iface.Start(ctx); err != ErrAlreadyStarted {
 		t.Fatalf("expected ErrAlreadyStarted, got %v", err)
@@ -427,7 +424,7 @@ func TestCallbackRaceDetector(t *testing.T) {
 		done <- iface.Start(ctx)
 	}()
 
-	time.Sleep(20 * time.Millisecond)
+	waitOnline(t, iface)
 
 	// Register callbacks from a separate goroutine while Start is running.
 	var wg sync.WaitGroup
@@ -465,7 +462,7 @@ func TestShutdownNoGoroutineLeak(t *testing.T) {
 		done <- iface.Start(ctx)
 	}()
 
-	time.Sleep(50 * time.Millisecond)
+	waitOnline(t, iface)
 	cancel() // fix should close stdinR and wait for io.Copy goroutine
 
 	select {
@@ -493,7 +490,7 @@ func TestRestartAfterStop(t *testing.T) {
 	done1 := make(chan error, 1)
 	go func() { done1 <- iface.Start(ctx1) }()
 
-	time.Sleep(50 * time.Millisecond)
+	waitOnline(t, iface)
 	cancel1()
 
 	select {
@@ -521,6 +518,54 @@ func TestRestartAfterStop(t *testing.T) {
 	}
 }
 
+// TestRestartRaceSetOnline verifies that cancelling Start() and immediately
+// calling Start() again does not leave the interface in an inconsistent online
+// state. Run with -race to catch data races.
+func TestRestartRaceSetOnline(t *testing.T) {
+	stdinR1, stdinW1 := io.Pipe()
+	stdinR2, stdinW2 := io.Pipe()
+	var stdout syncWriter
+
+	iface := New(Config{
+		Stdin:  stdinR1,
+		Stdout: &stdout,
+	})
+
+	ctx1, cancel1 := context.WithCancel(context.Background())
+	done1 := make(chan error, 1)
+	go func() { done1 <- iface.Start(ctx1) }()
+
+	waitOnline(t, iface)
+
+	// Cancel first Start and wait for it to finish.
+	cancel1()
+	<-done1
+
+	// Swap in a fresh stdin for the second Start.
+	iface.config.Stdin = stdinR2
+
+	ctx2, cancel2 := context.WithCancel(context.Background())
+	done2 := make(chan error, 1)
+	go func() { done2 <- iface.Start(ctx2) }()
+
+	waitOnline(t, iface)
+
+	// The interface should be online from the second Start.
+	if !iface.IsOnline() {
+		t.Fatal("expected online after restart")
+	}
+
+	// Clean up.
+	cancel2()
+	_ = stdinW1.Close()
+	_ = stdinW2.Close()
+	select {
+	case <-done2:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for second Start to return")
+	}
+}
+
 // TestReceiveShortWrite verifies that Receive returns io.ErrShortWrite when
 // the underlying writer accepts fewer bytes than provided (matching Python's
 // IOError check in process_outgoing).
@@ -538,7 +583,7 @@ func TestReceiveShortWrite(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- iface.Start(ctx) }()
 
-	time.Sleep(50 * time.Millisecond)
+	waitOnline(t, iface)
 
 	err := iface.Receive([]byte("test"))
 	if !errors.Is(err, io.ErrShortWrite) {

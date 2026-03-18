@@ -10,13 +10,15 @@ import (
 	"log/slog"
 	"os"
 	"sync"
+	"time"
 )
 
 // Interface implements the RNS PipeInterface protocol. It reads HDLC-framed
 // packets from Stdin and writes HDLC-framed packets to Stdout.
 type Interface struct {
 	config   Config
-	mu       sync.RWMutex
+	mu       sync.RWMutex  // protects: online, started, onSend, onStatus, cancelFn
+	writeMu  sync.Mutex    // serializes Stdout writes in Receive()
 	online   bool
 	started  bool
 	encoder  Encoder
@@ -26,6 +28,22 @@ type Interface struct {
 	cancelFn context.CancelFunc
 }
 
+// orDefault returns val if positive, otherwise def.
+func orDefault(val, def int) int {
+	if val <= 0 {
+		return def
+	}
+	return val
+}
+
+// orDefaultDuration returns val if positive, otherwise def.
+func orDefaultDuration(val, def time.Duration) time.Duration {
+	if val <= 0 {
+		return def
+	}
+	return val
+}
+
 // New creates an Interface with the given config, applying defaults where needed.
 func New(config Config) *Interface {
 	defaults := DefaultConfig()
@@ -33,39 +51,11 @@ func New(config Config) *Interface {
 	if config.Name == "" {
 		config.Name = defaults.Name
 	}
-	if config.MTU == 0 {
-		config.MTU = defaults.MTU
-	}
-	if config.HWMTU == 0 {
-		config.HWMTU = defaults.HWMTU
-	}
-	if config.Bitrate == 0 {
-		config.Bitrate = defaults.Bitrate
-	}
-	if config.ReconnectDelay == 0 {
-		config.ReconnectDelay = defaults.ReconnectDelay
-	}
-	if config.ReceiveBufferSize == 0 {
-		config.ReceiveBufferSize = defaults.ReceiveBufferSize
-	}
-
-	// Clamp negative values to defaults to prevent downstream panics
-	// (e.g. make(chan []byte, negative) in NewDecoder).
-	if config.MTU < 0 {
-		config.MTU = defaults.MTU
-	}
-	if config.HWMTU < 0 {
-		config.HWMTU = defaults.HWMTU
-	}
-	if config.Bitrate < 0 {
-		config.Bitrate = defaults.Bitrate
-	}
-	if config.ReconnectDelay < 0 {
-		config.ReconnectDelay = defaults.ReconnectDelay
-	}
-	if config.ReceiveBufferSize < 0 {
-		config.ReceiveBufferSize = defaults.ReceiveBufferSize
-	}
+	config.MTU = orDefault(config.MTU, defaults.MTU)
+	config.HWMTU = orDefault(config.HWMTU, defaults.HWMTU)
+	config.Bitrate = orDefault(config.Bitrate, defaults.Bitrate)
+	config.ReconnectDelay = orDefaultDuration(config.ReconnectDelay, defaults.ReconnectDelay)
+	config.ReceiveBufferSize = orDefault(config.ReceiveBufferSize, defaults.ReceiveBufferSize)
 
 	if config.Stdin == nil {
 		config.Stdin = os.Stdin
@@ -118,11 +108,11 @@ func (iface *Interface) Start(ctx context.Context) error {
 	iface.mu.Unlock()
 
 	defer func() {
+		iface.setOnline(false) // safety net — before clearing started so no new Start() races
 		iface.mu.Lock()
 		iface.started = false
 		iface.cancelFn = nil
 		iface.mu.Unlock()
-		iface.setOnline(false) // safety net
 	}()
 
 	recon := &reconnector{
@@ -237,9 +227,9 @@ func (iface *Interface) Receive(packet []byte) error {
 
 	frame := iface.encoder.Encode(packet)
 
-	iface.mu.Lock()
+	iface.writeMu.Lock()
 	n, err := iface.config.Stdout.Write(frame)
-	iface.mu.Unlock()
+	iface.writeMu.Unlock()
 
 	if err != nil {
 		return err
