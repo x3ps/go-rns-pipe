@@ -21,6 +21,26 @@ def wait_until(condition, timeout=30.0, interval=0.2, desc="condition"):
     raise AssertionError(f"Timed out after {timeout}s waiting for: {desc}")
 
 
+def ensure_has_path(dest_hash, timeout=30, request_interval=5):
+    """Discover path, retrying request_path periodically."""
+    if RNS.Transport.has_path(dest_hash):
+        return
+    RNS.Transport.request_path(dest_hash)
+    last_request = time.monotonic()
+
+    def _check():
+        nonlocal last_request
+        if RNS.Transport.has_path(dest_hash):
+            return True
+        now = time.monotonic()
+        if now - last_request >= request_interval:
+            RNS.Transport.request_path(dest_hash)
+            last_request = now
+        return False
+
+    wait_until(_check, timeout=timeout, desc="path discovery")
+
+
 # ---------------------------------------------------------------------------
 # Channel echo message type (must match reflector.py)
 # ---------------------------------------------------------------------------
@@ -101,3 +121,5 @@ def rns_client(tmp_path_factory):
 
     wait_until(_iface_online, timeout=20, desc="TCP interface online")
     yield reticulum
+
+

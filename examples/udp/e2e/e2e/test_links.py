@@ -6,7 +6,7 @@ import pytest
 import RNS
 import RNS.Channel
 
-from conftest import EchoMessage, wait_until
+from conftest import EchoMessage, ensure_has_path, wait_until
 
 pytestmark = pytest.mark.e2e
 
@@ -15,13 +15,7 @@ def _establish_link(reflector_hashes):
     """Establish a link to the reflector's link destination."""
     dest_hash = bytes.fromhex(reflector_hashes["link_dest_hash"])
 
-    if not RNS.Transport.has_path(dest_hash):
-        RNS.Transport.request_path(dest_hash)
-        wait_until(
-            lambda: RNS.Transport.has_path(dest_hash),
-            timeout=30,
-            desc="path to link destination",
-        )
+    ensure_has_path(dest_hash)
 
     remote_identity = RNS.Identity.recall(dest_hash)
     if remote_identity is None:
