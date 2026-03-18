@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strconv"
 
 	rnspipe "github.com/x3ps/go-rns-pipe"
 )
@@ -44,6 +45,7 @@ func DefaultConfig() Config {
 // CLI flags (highest priority).
 func ParseConfig() Config {
 	cfg := DefaultConfig()
+	logLevel := "info"
 
 	// Environment variables (middle priority).
 	if v := os.Getenv("RNS_UDP_LISTEN_ADDR"); v != "" {
@@ -55,21 +57,29 @@ func ParseConfig() Config {
 	if v := os.Getenv("RNS_UDP_NAME"); v != "" {
 		cfg.Name = v
 	}
+	if v := os.Getenv("RNS_UDP_MTU"); v != "" {
+		if mtu, err := strconv.Atoi(v); err == nil {
+			cfg.MTU = mtu
+		}
+	}
+	if v := os.Getenv("RNS_UDP_LOG_LEVEL"); v != "" {
+		logLevel = v
+	}
 
 	// CLI flags (highest priority).
-	flag.StringVar(&cfg.ListenAddr, "listen-addr", cfg.ListenAddr, "UDP address to listen on")
-	flag.StringVar(&cfg.PeerAddr, "peer-addr", cfg.PeerAddr, "UDP address to send packets to (broadcast or unicast)")
-	flag.StringVar(&cfg.Name, "name", cfg.Name, "interface name reported to RNS")
-	flag.IntVar(&cfg.MTU, "mtu", cfg.MTU, "RNS packet MTU in bytes")
+	fs := flag.NewFlagSet("rns-udp-iface", flag.ContinueOnError)
+	fs.StringVar(&cfg.ListenAddr, "listen-addr", cfg.ListenAddr, "UDP address to listen on")
+	fs.StringVar(&cfg.PeerAddr, "peer-addr", cfg.PeerAddr, "UDP address to send packets to (broadcast or unicast)")
+	fs.StringVar(&cfg.Name, "name", cfg.Name, "interface name reported to RNS")
+	fs.IntVar(&cfg.MTU, "mtu", cfg.MTU, "RNS packet MTU in bytes")
 
-	var logLevel string
-	flag.StringVar(&logLevel, "log-level", "info", "log level: debug, info, warn, error")
+	fs.StringVar(&logLevel, "log-level", logLevel, "log level: debug, info, warn, error")
 
-	flag.Usage = func() {
+	fs.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: rns-udp-iface [flags]\n\n")
 		fmt.Fprintf(os.Stderr, "A UDP transport for Reticulum, bridging HDLC-over-pipe to raw UDP datagrams.\n\n")
 		fmt.Fprintf(os.Stderr, "Flags:\n")
-		flag.PrintDefaults()
+		fs.PrintDefaults()
 		fmt.Fprintf(os.Stderr, "\nEnvironment variables:\n")
 		fmt.Fprintf(os.Stderr, "  RNS_UDP_LISTEN_ADDR   UDP address to listen on (default: 0.0.0.0:4242)\n")
 		fmt.Fprintf(os.Stderr, "  RNS_UDP_PEER_ADDR     UDP address to send to (default: 255.255.255.255:4242)\n")
@@ -78,7 +88,7 @@ func ParseConfig() Config {
 		fmt.Fprintf(os.Stderr, "  RNS_UDP_LOG_LEVEL     log level: debug, info, warn, error\n")
 	}
 
-	flag.Parse()
+	_ = fs.Parse(os.Args[1:])
 
 	switch logLevel {
 	case "debug":

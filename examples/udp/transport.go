@@ -35,8 +35,9 @@ func NewTransport(cfg Config, logger *slog.Logger) *Transport {
 // Step 3: Register status callback.
 // Step 4: Start drop-counter logger.
 // Step 5: Start pipe interface goroutine.
-// Step 6: UDP socket loop (reconnects on socket error).
-// Step 7: Return pipe interface error.
+// Step 6: Register OnSend callback.
+// Step 7: UDP socket loop (reconnects on socket error).
+// Step 8: Return pipe interface error.
 func (t *Transport) Start(ctx context.Context) error {
 	// Step 1: Resolve ListenAddr and PeerAddr — fail fast on bad config.
 	listenAddr, err := net.ResolveUDPAddr("udp", t.config.ListenAddr)
@@ -93,9 +94,30 @@ func (t *Transport) Start(ctx context.Context) error {
 		conn   *net.UDPConn
 	)
 
-	// Step 6: UDP socket loop — reopens the socket on error until ctx is done.
+	// Step 6: Register OnSend — forward pipe packets to UDP peer.
+	// The callback closes over connMu/conn so it always uses the current socket.
+	// See: UDPInterface.py:process_outgoing
+	iface.OnSend(func(pkt []byte) error {
+		connMu.RLock()
+		c := conn
+		connMu.RUnlock()
+
+		if c == nil {
+			// Socket is being replaced — drop silently.
+			dropped.Add(1)
+			return nil
+		}
+		if len(pkt) > t.config.MTU {
+			dropped.Add(1)
+			return nil
+		}
+		_, err := c.WriteTo(pkt, peerAddr)
+		return err
+	})
+
+	// Step 7: UDP socket loop — reopens the socket on error until ctx is done.
 	for {
-		// Step 6a: Open UDP socket with SO_BROADCAST enabled.
+		// Step 7a: Open UDP socket with SO_BROADCAST enabled.
 		newConn, openErr := openUDPConn(listenAddr)
 		if openErr != nil {
 			t.logger.Error("failed to open UDP socket", "err", openErr)
@@ -108,36 +130,16 @@ func (t *Transport) Start(ctx context.Context) error {
 			break
 		}
 
-		// Step 6b: Publish the new socket so OnSend can use it.
+		// Step 7b: Publish the new socket so OnSend can use it.
 		connMu.Lock()
 		conn = newConn
 		connMu.Unlock()
 
-		// Step 6c: Register OnSend — forward pipe packets to UDP peer.
-		// See: UDPInterface.py:process_outgoing
-		iface.OnSend(func(pkt []byte) error {
-			connMu.RLock()
-			c := conn
-			connMu.RUnlock()
-
-			if c == nil {
-				// Socket is being replaced — drop silently.
-				dropped.Add(1)
-				return nil
-			}
-			if len(pkt) > t.config.MTU {
-				dropped.Add(1)
-				return nil
-			}
-			_, err := c.WriteTo(pkt, peerAddr)
-			return err
-		})
-
-		// Step 6d: Read UDP datagrams and forward to rnsd via iface.Receive.
+		// Step 7c: Read UDP datagrams and forward to rnsd via iface.Receive.
 		// Accepts from all peers — no source-IP filter, matching UDPInterface.py.
 		readErr := t.readLoop(ctx, newConn, iface)
 
-		// Step 6e: Tear down current socket; decide whether to reopen.
+		// Step 7d: Tear down current socket; decide whether to reopen.
 		oldConn := newConn
 		connMu.Lock()
 		conn = nil
@@ -150,7 +152,7 @@ func (t *Transport) Start(ctx context.Context) error {
 		t.logger.Warn("UDP socket error, reopening", "err", readErr)
 	}
 
-	// Step 7: Return the pipe interface result (nil on clean shutdown).
+	// Step 8: Return the pipe interface result (nil on clean shutdown).
 	return <-ifaceErr
 }
 

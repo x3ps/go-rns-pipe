@@ -1,0 +1,16 @@
+[reticulum]
+  enable_transport = Yes
+  loglevel = 4
+
+[interfaces]
+  [[UDP Bridge]]
+    type = PipeInterface
+    interface_enabled = Yes
+    command = /app/rns-udp-iface --listen-addr 0.0.0.0:4242 --peer-addr node-b:4242
+    respawn_delay = 2
+
+  [[Test Client Interface]]
+    type = TCPServerInterface
+    interface_enabled = yes
+    listen_ip = 0.0.0.0
+    listen_port = 4343

@@ -23,8 +23,6 @@ go build -o rns-udp-iface .
 # Run (rnsd spawns this as a subprocess via PipeInterface)
 ./rns-udp-iface --listen-addr 0.0.0.0:4242 --peer-addr 255.255.255.255:4242
 
-# Or with Nix
-nix run github:x3ps/go-rns-pipe#rns-udp-iface -- --help
 ```
 
 ## Configuration
@@ -41,11 +39,11 @@ All options can be set via flags, environment variables, or both (flags win).
 
 ## Reticulum config snippet
 
-```toml
-[[interfaces]]
-  [[interfaces.UDPInterface]]
+```ini
+[interfaces]
+  [[UDP Bridge]]
   type = PipeInterface
-  enabled = yes
+  interface_enabled = Yes
   name = UDPInterface
   command = rns-udp-iface --listen-addr 0.0.0.0:4242 --peer-addr 255.255.255.255:4242
 ```
