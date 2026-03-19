@@ -1,6 +1,7 @@
 package rnspipe
 
 import (
+	"io"
 	"sync"
 	"sync/atomic"
 )
@@ -45,13 +46,19 @@ func (e *Encoder) Encode(packet []byte) []byte {
 
 // Decoder reads a byte stream and extracts complete HDLC-framed packets.
 // It implements io.Writer so it can be fed raw bytes incrementally.
+//
+// Write and Close are serialized by mu. Concurrent Write/Write and
+// Write/Close are safe — either a Write completes fully or returns
+// io.ErrClosedPipe.
 type Decoder struct {
+	mu        sync.Mutex
 	inFrame   bool
 	escape    bool
 	buf       []byte
 	hwMTU     int
 	packets   chan []byte
 	closeOnce sync.Once
+	closed    bool // protected by mu
 	dropped   atomic.Uint64
 }
 
@@ -66,9 +73,17 @@ func NewDecoder(hwMTU, chanSize int) *Decoder {
 }
 
 // Write feeds raw bytes into the decoder. Complete packets are emitted on the
-// Packets channel. The decoding logic exactly mirrors PipeInterface.readLoop.
+// Packets channel. Returns io.ErrClosedPipe if the decoder has been closed.
+// The decoding logic exactly mirrors PipeInterface.readLoop.
 // See: PipeInterface.py#L110-L134 — readLoop byte-by-byte state machine
 func (d *Decoder) Write(b []byte) (int, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	if d.closed {
+		return 0, io.ErrClosedPipe
+	}
+
 	for _, byte_ := range b {
 		if d.inFrame && byte_ == HDLCFlag {
 			// End of frame — deliver the packet (even if empty, matching Python upstream
@@ -123,8 +138,14 @@ func (d *Decoder) Packets() <-chan []byte {
 }
 
 // Close closes the packets channel. Safe to call multiple times.
+// After Close, Write returns io.ErrClosedPipe.
 func (d *Decoder) Close() {
-	d.closeOnce.Do(func() { close(d.packets) })
+	d.closeOnce.Do(func() {
+		d.mu.Lock()
+		d.closed = true
+		d.mu.Unlock()
+		close(d.packets)
+	})
 }
 
 // DroppedPackets returns the number of packets dropped due to a full channel.
