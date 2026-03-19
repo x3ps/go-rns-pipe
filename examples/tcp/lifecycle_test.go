@@ -134,7 +134,7 @@ func TestServerMultiClientBroadcast(t *testing.T) {
 	defer func() { _ = stdinW.Close() }()
 	stdoutR, stdoutW := io.Pipe()
 	defer func() { _ = stdoutR.Close() }()
-	go io.Copy(io.Discard, stdoutR) // drain pipe stdout
+	go func() { _, _ = io.Copy(io.Discard, stdoutR) }() // drain pipe stdout
 
 	iface := rnspipe.New(rnspipe.Config{
 		Stdin:  stdinR,
