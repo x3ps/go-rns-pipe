@@ -102,6 +102,10 @@ func (iface *Interface) Start(ctx context.Context) error {
 		iface.mu.Unlock()
 		return ErrAlreadyStarted
 	}
+	if iface.onSend == nil {
+		iface.mu.Unlock()
+		return ErrNoHandler
+	}
 	iface.started = true
 	ctx, iface.cancelFn = context.WithCancel(ctx)
 	iface.mu.Unlock()
@@ -160,6 +164,8 @@ func (iface *Interface) readLoop(ctx context.Context) error {
 				if closer, ok := iface.config.Stdin.(io.Closer); ok {
 					_ = closer.Close()
 					<-readErr // wait for io.Copy goroutine to exit
+				} else {
+					iface.logger.Warn("stdin does not implement io.Closer; io.Copy goroutine will leak until reader closes")
 				}
 			}
 			return nil
@@ -209,7 +215,9 @@ func (iface *Interface) drainPackets(decoder *Decoder) {
 				return // channel closed
 			}
 			if cb != nil {
-				_ = cb(pkt)
+				if err := cb(pkt); err != nil {
+					iface.logger.Warn("onSend callback error (drain)", "error", err)
+				}
 			}
 		default:
 			return
