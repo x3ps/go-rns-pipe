@@ -151,7 +151,7 @@ correct behaviour. Inbound traffic (client -> rnsd via `iface.Receive`) remains 
 
 ### Requirements
 
-- [Go](https://go.dev/) 1.24+
+- [Go](https://go.dev/) 1.26+
 - [Docker](https://www.docker.com/) or [Podman](https://podman.io/) (for E2E tests)
 - [golangci-lint](https://golangci-lint.run/) (for linting)
 
