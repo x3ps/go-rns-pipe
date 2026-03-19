@@ -3,6 +3,8 @@ package rnspipe
 import (
 	"bytes"
 	"fmt"
+	"io"
+	"sync"
 	"testing"
 	"time"
 )
@@ -301,6 +303,59 @@ func TestDecoderDoubleClose(t *testing.T) {
 	dec := NewDecoder(1064, 1)
 	dec.Close()
 	dec.Close() // must not panic
+}
+
+func TestDecoderWriteAfterClose(t *testing.T) {
+	t.Parallel()
+
+	enc := &Encoder{}
+	dec := NewDecoder(1064, 1)
+	dec.Close()
+
+	frame := enc.Encode([]byte("after-close"))
+	_, err := dec.Write(frame)
+	if err != io.ErrClosedPipe {
+		t.Fatalf("expected io.ErrClosedPipe, got %v", err)
+	}
+}
+
+func TestDecoderConcurrentWriteClose(t *testing.T) {
+	t.Parallel()
+
+	const goroutines = 50
+	enc := &Encoder{}
+	frame := enc.Encode([]byte("concurrent"))
+
+	dec := NewDecoder(1064, 64)
+
+	var wg sync.WaitGroup
+
+	// Goroutines writing concurrently.
+	for range goroutines {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := dec.Write(frame)
+			if err != nil && err != io.ErrClosedPipe {
+				panic(fmt.Sprintf("unexpected Write error: %v", err))
+			}
+		}()
+	}
+
+	// One goroutine closing concurrently.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		dec.Close()
+	}()
+
+	wg.Wait()
+
+	// After Close, Write must return io.ErrClosedPipe.
+	_, err := dec.Write(frame)
+	if err != io.ErrClosedPipe {
+		t.Fatalf("expected io.ErrClosedPipe after Close, got %v", err)
+	}
 }
 
 func TestDecoderDropMultiple(t *testing.T) {
