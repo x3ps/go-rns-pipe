@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"net"
@@ -22,6 +23,15 @@ func TestUDPTransportLifecycle(t *testing.T) {
 		MTU:        500,
 	}
 	transport := NewTransport(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	// Inject io.Pipe so Start doesn't use real stdin/stdout.
+	stdinR, stdinW := io.Pipe()
+	defer func() { _ = stdinW.Close() }()
+	transport.pipeConfig = rnspipe.Config{
+		Stdin:  stdinR,
+		Stdout: io.Discard,
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -75,6 +85,7 @@ func TestReadLoop(t *testing.T) {
 		Stdout: stdoutW,
 		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
+	iface.OnSend(func([]byte) error { return nil })
 
 	// Drain stdout so Receive() writes don't block.
 	go func() {
@@ -147,5 +158,47 @@ func TestReadLoop(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("readLoop did not return after context cancel")
+	}
+}
+
+// TestUDPTransportPipeClose verifies that when the pipe closes (stdin EOF),
+// Start returns ErrPipeClosed instead of blocking forever in the socket loop.
+func TestUDPTransportPipeClose(t *testing.T) {
+	t.Parallel()
+
+	stdinR, stdinW := io.Pipe()
+
+	cfg := Config{
+		ListenAddr: "127.0.0.1:0",
+		PeerAddr:   "127.0.0.1:1",
+		Name:       "test-pipe-close",
+		MTU:        500,
+	}
+	transport := NewTransport(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	transport.pipeConfig = rnspipe.Config{
+		Stdin:  stdinR,
+		Stdout: io.Discard,
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() { done <- transport.Start(ctx) }()
+
+	// Give the transport time to start up.
+	time.Sleep(100 * time.Millisecond)
+
+	// Close the write end of stdin — pipe sees clean EOF → ErrPipeClosed.
+	_ = stdinW.Close()
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, rnspipe.ErrPipeClosed) {
+			t.Fatalf("expected ErrPipeClosed, got %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("Start did not return after pipe close")
 	}
 }
