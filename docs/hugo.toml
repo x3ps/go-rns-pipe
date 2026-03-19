@@ -1,39 +1,68 @@
 baseURL = "https://x3ps.github.io/go-rns-pipe/"
-languageCode = "en-us"
 title = "go-rns-pipe"
 theme = "hextra"
 
+defaultContentLanguage = "en"
+defaultContentLanguageInSubdir = false
+
+[languages]
+  [languages.en]
+    languageName = "English"
+    languageCode = "en-us"
+    weight = 1
+    title = "go-rns-pipe"
+    [languages.en.params]
+      description = "Go implementation of the Reticulum PipeInterface protocol with HDLC framing"
+      [languages.en.params.editURL]
+        enable = true
+        base = "https://github.com/x3ps/go-rns-pipe/edit/main/docs/content"
+
+  [languages.ru]
+    languageName = "Русский"
+    languageCode = "ru"
+    weight = 2
+    title = "go-rns-pipe"
+    [languages.ru.params]
+      description = "Реализация протокола Reticulum PipeInterface на Go с HDLC-фреймингом"
+      [languages.ru.params.editURL]
+        enable = true
+        base = "https://github.com/x3ps/go-rns-pipe/edit/main/docs/content"
+
 [params]
-  description = "Go implementation of the Reticulum PipeInterface protocol with HDLC framing"
-  editURL = "https://github.com/x3ps/go-rns-pipe/edit/main/docs/content/"
-
-[params.navbar]
-  displayTitle = true
-  displayLogo = false
-
-[params.footer]
-  displayCopyright = true
-  displayPoweredBy = true
-
-[params.highlight]
-  copy = true
+  [params.navbar]
+    displayTitle = true
+    displayLogo = false
+  [params.footer]
+    displayCopyright = true
+    displayPoweredBy = true
+  [params.highlight]
+    copy = true
 
 [menu]
   [[menu.main]]
+    identifier = "docs"
     name = "Docs"
     pageRef = "/getting-started"
     weight = 1
   [[menu.main]]
+    identifier = "api"
     name = "API"
     pageRef = "/api"
     weight = 2
   [[menu.main]]
+    identifier = "github"
     name = "GitHub"
     url = "https://github.com/x3ps/go-rns-pipe"
     weight = 3
     [menu.main.params]
       type = "icon"
       icon = "github"
+  [[menu.main]]
+    identifier = "lang"
+    name = "Language"
+    weight = 4
+    [menu.main.params]
+      type = "language-switch"
 
 [markup]
   [markup.highlight]
