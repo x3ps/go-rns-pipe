@@ -392,6 +392,198 @@ func TestOnStatusTransitions(t *testing.T) {
 	}
 }
 
+// respawningReader wraps a slice of io.Readers. Each Read call forwards to the
+// current reader; on EOF the index advances so the next readLoop iteration
+// gets a fresh reader.
+type respawningReader struct {
+	readers []io.Reader
+	idx     atomic.Int32
+}
+
+func (r *respawningReader) Read(p []byte) (int, error) {
+	i := int(r.idx.Load())
+	if i >= len(r.readers) {
+		return 0, io.EOF
+	}
+	n, err := r.readers[i].Read(p)
+	if err == io.EOF {
+		r.idx.Add(1)
+	}
+	return n, err
+}
+
+func TestReconnectWithNewStdin(t *testing.T) {
+	t.Parallel()
+
+	enc := &Encoder{}
+	// Two readers, each containing one HDLC frame followed by EOF.
+	frame1 := enc.Encode([]byte("reconnect-pkt-1"))
+	frame2 := enc.Encode([]byte("reconnect-pkt-2"))
+
+	rr := &respawningReader{
+		readers: []io.Reader{
+			bytes.NewReader(frame1),
+			bytes.NewReader(frame2),
+		},
+	}
+
+	var logBuf syncBuffer
+	logger := slog.New(slog.NewTextHandler(&logBuf, nil))
+
+	iface := New(Config{
+		Stdin:                rr,
+		Stdout:               &bytes.Buffer{},
+		ReconnectDelay:       10 * time.Millisecond,
+		MaxReconnectAttempts: 3,
+		Logger:               logger,
+	})
+
+	var received [][]byte
+	var mu sync.Mutex
+	allReceived := make(chan struct{}, 1)
+
+	iface.OnSend(func(pkt []byte) error {
+		mu.Lock()
+		received = append(received, append([]byte(nil), pkt...))
+		if len(received) == 2 {
+			select {
+			case allReceived <- struct{}{}:
+			default:
+			}
+		}
+		mu.Unlock()
+		return nil
+	})
+
+	var transitions []bool
+	var tmu sync.Mutex
+	iface.OnStatus(func(online bool) {
+		tmu.Lock()
+		transitions = append(transitions, online)
+		tmu.Unlock()
+	})
+
+	done := make(chan error, 1)
+	go func() { done <- iface.Start(context.Background()) }()
+
+	// Wait for both packets or timeout.
+	select {
+	case <-allReceived:
+	case <-time.After(5 * time.Second):
+		mu.Lock()
+		n := len(received)
+		mu.Unlock()
+		t.Fatalf("timeout: received %d/2 packets", n)
+	}
+
+	// Wait for Start to finish (will exhaust reconnects after both readers EOF).
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for Start to return")
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	if len(received) < 2 {
+		t.Fatalf("expected 2 packets, got %d", len(received))
+	}
+	if !bytes.Equal(received[0], []byte("reconnect-pkt-1")) {
+		t.Errorf("pkt1: got %q, want %q", received[0], "reconnect-pkt-1")
+	}
+	if !bytes.Equal(received[1], []byte("reconnect-pkt-2")) {
+		t.Errorf("pkt2: got %q, want %q", received[1], "reconnect-pkt-2")
+	}
+
+	// Check transitions: should see online->offline->online->offline pattern.
+	tmu.Lock()
+	defer tmu.Unlock()
+	if len(transitions) < 4 {
+		t.Fatalf("expected at least 4 status transitions, got %v", transitions)
+	}
+	if transitions[0] != true || transitions[1] != false || transitions[2] != true || transitions[3] != false {
+		t.Errorf("expected [true,false,true,false,...], got %v", transitions)
+	}
+}
+
+func TestConcurrentReceiveAndInbound(t *testing.T) {
+	t.Parallel()
+
+	iface, stdinW, stdoutR := newTestPipe(t)
+
+	const inboundCount = 50
+	const outboundGoroutines = 10
+	const outboundPerGoroutine = 5
+
+	var receivedCount atomic.Int32
+	allInbound := make(chan struct{}, 1)
+
+	iface.OnSend(func(pkt []byte) error {
+		if receivedCount.Add(1) == inboundCount {
+			select {
+			case allInbound <- struct{}{}:
+			default:
+			}
+		}
+		return nil
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() { done <- iface.Start(ctx) }()
+
+	waitOnline(t, iface)
+
+	// Drain stdout in background.
+	go func() {
+		buf := make([]byte, 4096)
+		for {
+			if _, err := stdoutR.Read(buf); err != nil {
+				return
+			}
+		}
+	}()
+
+	// Launch concurrent outbound Receive() calls.
+	var wg sync.WaitGroup
+	for i := range outboundGoroutines {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := range outboundPerGoroutine {
+				_ = iface.Receive([]byte(fmt.Sprintf("out-%d-%d", i, j)))
+			}
+		}()
+	}
+
+	// Simultaneously write inbound HDLC frames.
+	enc := &Encoder{}
+	for i := range inboundCount {
+		frame := enc.Encode([]byte(fmt.Sprintf("in-%d", i)))
+		if _, err := stdinW.Write(frame); err != nil {
+			t.Fatalf("write inbound frame %d: %v", i, err)
+		}
+	}
+
+	wg.Wait()
+
+	select {
+	case <-allInbound:
+	case <-time.After(5 * time.Second):
+		t.Fatalf("timeout: received %d/%d inbound packets", receivedCount.Load(), inboundCount)
+	}
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for shutdown")
+	}
+}
+
 func TestFullRoundTrip(t *testing.T) {
 	t.Parallel()
 
