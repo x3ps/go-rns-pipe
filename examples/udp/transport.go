@@ -18,8 +18,9 @@ const hwMTU = 1064
 
 // Transport bridges a rnspipe.Interface (HDLC/pipe to rnsd) with a UDP socket.
 type Transport struct {
-	config Config
-	logger *slog.Logger
+	config     Config
+	logger     *slog.Logger
+	pipeConfig rnspipe.Config // zero value = defaults (os.Stdin/os.Stdout); tests inject io.Pipe pairs
 }
 
 // NewTransport creates a Transport with the given config and logger.
@@ -33,10 +34,10 @@ func NewTransport(cfg Config, logger *slog.Logger) *Transport {
 // Step 1: Resolve addresses.
 // Step 2: Create rnspipe.Interface.
 // Step 3: Register status callback.
-// Step 4: Start drop-counter logger.
-// Step 5: Start pipe interface goroutine.
-// Step 6: Register OnSend callback.
-// Step 7: UDP socket loop (reconnects on socket error).
+// Step 4: Register OnSend callback.
+// Step 5: Start pipe interface goroutine (pipeDone + loopCancel).
+// Step 6: Start drop-counter logger.
+// Step 7: UDP socket loop (reconnects on socket error, exits on loopCtx cancel).
 // Step 8: Return pipe interface error.
 func (t *Transport) Start(ctx context.Context) error {
 	// Step 1: Resolve local listen address only — fail fast on bad config.
@@ -46,15 +47,16 @@ func (t *Transport) Start(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	var peerAddr *net.UDPAddr
 
 	// Step 2: Create rnspipe.Interface connected to rnsd via stdin/stdout.
-	iface := rnspipe.New(rnspipe.Config{
-		Name:      t.config.Name,
-		MTU:       t.config.MTU,
-		LogLevel:  t.config.LogLevel,
-		ExitOnEOF: true,
-	})
+	// t.pipeConfig provides a testability seam: tests inject io.Pipe pairs
+	// via Stdin/Stdout; production uses os.Stdin/os.Stdout (zero-value defaults).
+	pipeCfg := t.pipeConfig
+	pipeCfg.Name = t.config.Name
+	pipeCfg.MTU = t.config.MTU
+	pipeCfg.LogLevel = t.config.LogLevel
+	pipeCfg.ExitOnEOF = true
+	iface := rnspipe.New(pipeCfg)
 
 	// Step 3: Register status callback — log online/offline transitions.
 	iface.OnStatus(func(online bool) {
@@ -65,41 +67,26 @@ func (t *Transport) Start(ctx context.Context) error {
 		}
 	})
 
-	// Step 4: Start drop-counter logger goroutine.
-	// Oversized or mid-reconnect drops are counted and logged every 30s.
-	var dropped atomic.Int64
-	go func() {
-		ticker := time.NewTicker(30 * time.Second)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				if n := dropped.Swap(0); n > 0 {
-					t.logger.Warn("packets dropped", "count", n)
-				}
-			}
-		}
-	}()
-
-	// Step 5: Start pipe interface in background; capture result via channel.
-	ifaceErr := make(chan error, 1)
-	go func() { ifaceErr <- iface.Start(ctx) }()
-
-	// conn and connMu protect access to the active UDP socket across the
-	// OnSend callback and the socket loop below.
+	// conn, peerAddr, and connMu protect access to the active UDP socket and
+	// resolved peer address across the OnSend callback and the socket loop.
+	// Both are read/written under the same lock for atomicity.
 	var (
-		connMu sync.RWMutex
-		conn   *net.UDPConn
+		connMu   sync.RWMutex
+		conn     *net.UDPConn
+		peerAddr *net.UDPAddr
 	)
 
-	// Step 6: Register OnSend — forward pipe packets to UDP peer.
-	// The callback closes over connMu/conn so it always uses the current socket.
+	// Step 4: Register OnSend BEFORE Start — forward pipe packets to UDP peer.
+	// Must be registered before iface.Start so no decoded packets are silently
+	// dropped (pipe.go skips delivery when cb == nil).
+	// The callback reads conn and peerAddr under connMu so it always sees a
+	// consistent pair.
 	// See: UDPInterface.py:process_outgoing
+	var dropped atomic.Int64
 	iface.OnSend(func(pkt []byte) error {
 		connMu.RLock()
 		c := conn
+		peer := peerAddr
 		connMu.RUnlock()
 
 		if c == nil {
@@ -111,11 +98,43 @@ func (t *Transport) Start(ctx context.Context) error {
 			dropped.Add(1)
 			return nil
 		}
-		_, err := c.WriteTo(pkt, peerAddr)
+		if peer == nil {
+			dropped.Add(1)
+			return nil
+		}
+		_, err := c.WriteTo(pkt, peer)
 		return err
 	})
 
-	// Step 7: UDP socket loop — reopens the socket on error until ctx is done.
+	// Step 5: Start pipe interface in background; cancel socket loop when pipe exits.
+	pipeDone := make(chan error, 1)
+	loopCtx, loopCancel := context.WithCancel(ctx)
+	defer loopCancel()
+
+	go func() {
+		pipeDone <- iface.Start(ctx) // uses original ctx, not loopCtx
+		loopCancel()                 // kill socket loop when pipe exits
+	}()
+
+	// Step 6: Start drop-counter logger goroutine.
+	// Oversized or mid-reconnect drops are counted and logged every 30s.
+	// Uses loopCtx so it exits when the pipe exits, not only on external cancel.
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-loopCtx.Done():
+				return
+			case <-ticker.C:
+				if n := dropped.Swap(0); n > 0 {
+					t.logger.Warn("packets dropped", "count", n)
+				}
+			}
+		}
+	}()
+
+	// Step 7: UDP socket loop — reopens the socket on error until loopCtx is done.
 	for {
 		// Step 7a: Resolve peer address — retries each iteration to tolerate
 		// DNS not being ready at startup (peer container may not exist yet).
@@ -123,37 +142,39 @@ func (t *Transport) Start(ctx context.Context) error {
 		if resolveErr != nil {
 			t.logger.Warn("peer address not yet resolvable, retrying",
 				"addr", t.config.PeerAddr, "err", resolveErr)
+			timer := time.NewTimer(2 * time.Second)
 			select {
-			case <-ctx.Done():
-				break
-			case <-time.After(2 * time.Second):
+			case <-loopCtx.Done():
+				timer.Stop()
+			case <-timer.C:
 				continue
 			}
 			break
 		}
-		peerAddr = newPeer
 
 		// Step 7b: Open UDP socket with SO_BROADCAST enabled.
 		newConn, openErr := openUDPConn(listenAddr)
 		if openErr != nil {
 			t.logger.Error("failed to open UDP socket", "err", openErr)
+			timer := time.NewTimer(100 * time.Millisecond)
 			select {
-			case <-ctx.Done():
-				break
-			case <-time.After(100 * time.Millisecond):
+			case <-loopCtx.Done():
+				timer.Stop()
+			case <-timer.C:
 				continue
 			}
 			break
 		}
 
-		// Step 7c: Publish the new socket so OnSend can use it.
+		// Step 7c: Publish the new socket and peer so OnSend can use them.
 		connMu.Lock()
 		conn = newConn
+		peerAddr = newPeer
 		connMu.Unlock()
 
 		// Step 7d: Read UDP datagrams and forward to rnsd via iface.Receive.
 		// Accepts from all peers — no source-IP filter, matching UDPInterface.py.
-		readErr := t.readLoop(ctx, newConn, iface)
+		readErr := t.readLoop(loopCtx, newConn, iface)
 
 		// Step 7e: Tear down current socket; decide whether to reopen.
 		oldConn := newConn
@@ -162,14 +183,14 @@ func (t *Transport) Start(ctx context.Context) error {
 		connMu.Unlock()
 		_ = oldConn.Close()
 
-		if ctx.Err() != nil {
+		if loopCtx.Err() != nil {
 			break
 		}
 		t.logger.Warn("UDP socket error, reopening", "err", readErr)
 	}
 
 	// Step 8: Return the pipe interface result (nil on clean shutdown).
-	return <-ifaceErr
+	return <-pipeDone
 }
 
 // openUDPConn creates a UDP socket bound to addr with SO_BROADCAST enabled.
