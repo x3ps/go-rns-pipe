@@ -1,3 +1,4 @@
 [submodule "docs/themes/hextra"]
 	path = docs/themes/hextra
 	url = https://github.com/imfing/hextra.git
+	branch = main
