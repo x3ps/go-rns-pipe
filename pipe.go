@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -26,6 +27,12 @@ type Interface struct {
 	onStatus func(bool)         // called on online/offline transitions
 	logger   *slog.Logger
 	cancelFn context.CancelFunc
+
+	// Traffic counters (atomic, lock-free).
+	packetsSent     atomic.Uint64
+	packetsReceived atomic.Uint64
+	bytesSent       atomic.Uint64
+	bytesReceived   atomic.Uint64
 }
 
 // orDefault returns val if positive, otherwise def.
@@ -196,6 +203,8 @@ func (iface *Interface) readLoop(ctx context.Context) error {
 				pkts = nil
 				continue
 			}
+			iface.bytesReceived.Add(uint64(len(pkt)))
+			iface.packetsReceived.Add(1)
 			iface.mu.RLock()
 			cb := iface.onSend
 			iface.mu.RUnlock()
@@ -219,6 +228,8 @@ func (iface *Interface) drainPackets(decoder *Decoder) {
 			if !ok {
 				return // channel closed
 			}
+			iface.bytesReceived.Add(uint64(len(pkt)))
+			iface.packetsReceived.Add(1)
 			if cb != nil {
 				if err := cb(pkt); err != nil {
 					iface.logger.Warn("onSend callback error (drain)", "error", err)
@@ -258,6 +269,9 @@ func (iface *Interface) Receive(packet []byte) error {
 	if n != len(frame) {
 		return io.ErrShortWrite
 	}
+
+	iface.bytesSent.Add(uint64(len(packet)))
+	iface.packetsSent.Add(1)
 	return nil
 }
 
@@ -282,6 +296,18 @@ func (iface *Interface) MTU() int {
 func (iface *Interface) HWMTU() int {
 	return iface.config.HWMTU
 }
+
+// PacketsSent returns the total number of packets sent via Receive().
+func (iface *Interface) PacketsSent() uint64 { return iface.packetsSent.Load() }
+
+// PacketsReceived returns the total number of packets received from stdin.
+func (iface *Interface) PacketsReceived() uint64 { return iface.packetsReceived.Load() }
+
+// BytesSent returns the total payload bytes sent via Receive() (before HDLC framing).
+func (iface *Interface) BytesSent() uint64 { return iface.bytesSent.Load() }
+
+// BytesReceived returns the total payload bytes received from stdin (after HDLC decoding).
+func (iface *Interface) BytesReceived() uint64 { return iface.bytesReceived.Load() }
 
 func (iface *Interface) setOnline(online bool) {
 	iface.mu.Lock()
