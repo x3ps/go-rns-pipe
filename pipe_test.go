@@ -96,6 +96,7 @@ func TestInterfaceStartStop(t *testing.T) {
 		Stdin:  stdinR,
 		Stdout: &stdout,
 	})
+	iface.OnSend(func([]byte) error { return nil })
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
@@ -217,6 +218,14 @@ func TestReceiveOnStopped(t *testing.T) {
 	}
 }
 
+func TestStartWithoutOnSend(t *testing.T) {
+	iface := New(Config{})
+
+	if err := iface.Start(context.Background()); err != ErrNoHandler {
+		t.Fatalf("expected ErrNoHandler, got %v", err)
+	}
+}
+
 // TestReceiveWhileOffline verifies that Receive returns ErrOffline when
 // started=true but online=false (i.e. during the reconnect backoff window).
 func TestReceiveWhileOffline(t *testing.T) {
@@ -229,6 +238,7 @@ func TestReceiveWhileOffline(t *testing.T) {
 		ReconnectDelay:       200 * time.Millisecond,
 		MaxReconnectAttempts: 2,
 	})
+	iface.OnSend(func([]byte) error { return nil })
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -270,6 +280,7 @@ func TestConcurrentReceive(t *testing.T) {
 		Stdin:  stdinR,
 		Stdout: &stdout,
 	})
+	iface.OnSend(func([]byte) error { return nil })
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -335,6 +346,7 @@ func TestAlreadyStarted(t *testing.T) {
 		Stdin:  stdinR,
 		Stdout: &stdout,
 	})
+	iface.OnSend(func([]byte) error { return nil })
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -442,6 +454,7 @@ func TestExitOnEOFTerminates(t *testing.T) {
 		ExitOnEOF:      true,
 		ReconnectDelay: 10 * time.Second, // large delay — must not be reached
 	})
+	iface.OnSend(func([]byte) error { return nil })
 
 	done := make(chan error, 1)
 	go func() { done <- iface.Start(context.Background()) }()
@@ -496,6 +509,7 @@ func TestCallbackRaceDetector(t *testing.T) {
 		Stdin:  stdinR,
 		Stdout: &stdout,
 	})
+	iface.OnSend(func([]byte) error { return nil })
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
@@ -534,6 +548,7 @@ func TestShutdownNoGoroutineLeak(t *testing.T) {
 		Stdin:  stdinR,
 		Stdout: &stdout,
 	})
+	iface.OnSend(func([]byte) error { return nil })
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
@@ -564,6 +579,7 @@ func TestRestartAfterStop(t *testing.T) {
 		Stdin:  stdinR,
 		Stdout: &stdout,
 	})
+	iface.OnSend(func([]byte) error { return nil })
 
 	ctx1, cancel1 := context.WithCancel(context.Background())
 	done1 := make(chan error, 1)
@@ -609,6 +625,7 @@ func TestRestartRaceSetOnline(t *testing.T) {
 		Stdin:  stdinR1,
 		Stdout: &stdout,
 	})
+	iface.OnSend(func([]byte) error { return nil })
 
 	ctx1, cancel1 := context.WithCancel(context.Background())
 	done1 := make(chan error, 1)
@@ -655,6 +672,7 @@ func TestReceiveShortWrite(t *testing.T) {
 		Stdin:  stdinR,
 		Stdout: &shortWriter{},
 	})
+	iface.OnSend(func([]byte) error { return nil })
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
