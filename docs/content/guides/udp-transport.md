@@ -20,13 +20,35 @@ make build-udp
 # outputs: bin/rns-udp-iface
 ```
 
+## CLI Flags
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--listen-addr` | `0.0.0.0:4242` | UDP address to listen on for incoming datagrams |
+| `--peer-addr` | `255.255.255.255:4242` | UDP address to send packets to (broadcast or unicast) |
+| `--name` | `UDPInterface` | Interface name reported to RNS |
+| `--mtu` | `500` | RNS packet MTU in bytes |
+| `--log-level` | `info` | Log verbosity: `debug`/`info`/`warn`/`error` |
+
+## Environment Variables
+
+| Variable | Flag equivalent |
+|----------|----------------|
+| `RNS_UDP_LISTEN_ADDR` | `--listen-addr` |
+| `RNS_UDP_PEER_ADDR` | `--peer-addr` |
+| `RNS_UDP_NAME` | `--name` |
+| `RNS_UDP_MTU` | `--mtu` |
+| `RNS_UDP_LOG_LEVEL` | `--log-level` |
+
+CLI flags take priority over environment variables.
+
 ## Usage
 
 ```bash
-rns-udp-iface --listen 0.0.0.0:4243 --peer 192.168.1.255:4243 --name UDPBridge
+rns-udp-iface --listen-addr 0.0.0.0:4243 --peer-addr 192.168.1.255:4243 --name UDPBridge
 ```
 
-`SO_BROADCAST` is always enabled, so `--peer` can be a broadcast address.
+`SO_BROADCAST` is always enabled, so `--peer-addr` can be a broadcast address.
 
 ## rnsd Configuration
 
@@ -35,7 +57,7 @@ rns-udp-iface --listen 0.0.0.0:4243 --peer 192.168.1.255:4243 --name UDPBridge
   type = PipeInterface
   enabled = yes
   respawn_delay = 5
-  command = /usr/local/bin/rns-udp-iface --listen 0.0.0.0:4243 --peer 192.168.1.255:4243 --name UDPBridge
+  command = /usr/local/bin/rns-udp-iface --listen-addr 0.0.0.0:4243 --peer-addr 192.168.1.255:4243 --name UDPBridge
 ```
 
 ## Implementation Highlights
