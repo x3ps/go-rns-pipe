@@ -6,7 +6,6 @@
   };
   outputs =
     {
-      self,
       nixpkgs,
       flake-utils,
     }:
@@ -25,6 +24,7 @@
             pkgs.go
             pkgs.gopls
             pkgs.golangci-lint
+            pkgs.hugo
             (pkgs.python3.withPackages (ps: [
               ps.pytest
               ps.rns
