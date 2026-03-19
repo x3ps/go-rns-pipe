@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"math/rand/v2"
 	"sync"
 	"testing"
 	"time"
@@ -355,6 +356,91 @@ func TestDecoderConcurrentWriteClose(t *testing.T) {
 	_, err := dec.Write(frame)
 	if err != io.ErrClosedPipe {
 		t.Fatalf("expected io.ErrClosedPipe after Close, got %v", err)
+	}
+}
+
+func TestEncodeDecodeRandomFuzzing(t *testing.T) {
+	t.Parallel()
+
+	enc := &Encoder{}
+	rng := rand.New(rand.NewPCG(42, 0))
+
+	for i := range 200 {
+		size := rng.IntN(2049) // [0, 2048]
+		payload := make([]byte, size)
+		for j := range payload {
+			payload[j] = byte(rng.IntN(256))
+		}
+
+		t.Run(fmt.Sprintf("iter_%d_size_%d", i, size), func(t *testing.T) {
+			t.Parallel()
+
+			frame := enc.Encode(payload)
+			dec := NewDecoder(2048, 1)
+			defer dec.Close()
+
+			if _, err := dec.Write(frame); err != nil {
+				t.Fatalf("Write: %v", err)
+			}
+
+			select {
+			case pkt := <-dec.Packets():
+				if !bytes.Equal(pkt, payload) {
+					t.Errorf("round-trip mismatch: got %d bytes, want %d", len(pkt), len(payload))
+				}
+			case <-time.After(time.Second):
+				t.Fatal("timeout waiting for packet")
+			}
+		})
+	}
+}
+
+func TestDecoderHWMTUBoundaryExact(t *testing.T) {
+	t.Parallel()
+
+	enc := &Encoder{}
+	const hwMTU = 1064
+
+	cases := []struct {
+		name      string
+		size      int
+		wantSize  int
+		truncated bool
+	}{
+		{"at_minus_one", 1063, 1063, false},
+		{"at_exact", 1064, 1064, false},
+		{"at_plus_one", 1065, 1064, true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			payload := make([]byte, tc.size)
+			for i := range payload {
+				payload[i] = byte(i % 251) // avoid 0x7E/0x7D patterns for simplicity
+			}
+
+			frame := enc.Encode(payload)
+			dec := NewDecoder(hwMTU, 1)
+			defer dec.Close()
+
+			if _, err := dec.Write(frame); err != nil {
+				t.Fatalf("Write: %v", err)
+			}
+
+			select {
+			case pkt := <-dec.Packets():
+				if len(pkt) != tc.wantSize {
+					t.Errorf("got %d bytes, want %d", len(pkt), tc.wantSize)
+				}
+				if !bytes.Equal(pkt, payload[:tc.wantSize]) {
+					t.Errorf("first %d bytes do not match", tc.wantSize)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("timeout waiting for packet")
+			}
+		})
 	}
 }
 
