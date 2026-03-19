@@ -3,7 +3,7 @@ title: Changelog
 weight: 6
 ---
 
-## Recent Changes
+## Unreleased
 
 ### Go 1.26 Upgrade
 - Updated module to Go 1.26
