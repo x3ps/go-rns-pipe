@@ -70,6 +70,11 @@ func New(config Config) *Interface {
 		}))
 	}
 
+	if config.MTU > config.HWMTU {
+		logger.Warn("MTU exceeds HWMTU; packets may be truncated",
+			"mtu", config.MTU, "hwmtu", config.HWMTU)
+	}
+
 	return &Interface{
 		config: config,
 		logger: logger.With("interface", config.Name),

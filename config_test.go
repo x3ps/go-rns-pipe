@@ -1,6 +1,7 @@
 package rnspipe
 
 import (
+	"bytes"
 	"io"
 	"log/slog"
 	"testing"
@@ -142,5 +143,39 @@ func TestNewCustomLogger(t *testing.T) {
 	// the config's Logger was consumed (no default was created).
 	if iface.logger == nil {
 		t.Fatal("logger is nil")
+	}
+}
+
+func TestNewWarnsMTUExceedsHWMTU(t *testing.T) {
+	t.Parallel()
+
+	var logBuf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	_ = New(Config{
+		MTU:    2000,
+		HWMTU:  1064,
+		Logger: logger,
+	})
+
+	if !bytes.Contains(logBuf.Bytes(), []byte("MTU exceeds HWMTU")) {
+		t.Errorf("expected warning about MTU exceeding HWMTU, got: %s", logBuf.String())
+	}
+}
+
+func TestNewNoWarningMTUWithinHWMTU(t *testing.T) {
+	t.Parallel()
+
+	var logBuf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	_ = New(Config{
+		MTU:    500,
+		HWMTU:  1064,
+		Logger: logger,
+	})
+
+	if bytes.Contains(logBuf.Bytes(), []byte("MTU exceeds HWMTU")) {
+		t.Errorf("unexpected warning when MTU <= HWMTU: %s", logBuf.String())
 	}
 }
