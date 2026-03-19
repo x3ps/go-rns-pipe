@@ -42,11 +42,19 @@ All options can be set via flags, environment variables, or both (flags win).
 ```ini
 [interfaces]
   [[UDP Bridge]]
-  type = PipeInterface
-  interface_enabled = Yes
-  name = UDPInterface
-  command = rns-udp-iface --listen-addr 0.0.0.0:4242 --peer-addr 255.255.255.255:4242
+    type = PipeInterface
+    interface_enabled = Yes
+    command = rns-udp-iface --listen-addr 0.0.0.0:4242 --peer-addr 255.255.255.255:4242
+    respawn_delay = 5
 ```
+
+## Protocol Details
+
+- Raw UDP datagrams on the network side (no HDLC framing — datagram boundaries delimit packets)
+- `SO_BROADCAST` always enabled
+- HW_MTU = 1064 bytes (read buffer size, matching `PipeInterface.py`)
+- 200ms read deadline for context cancellation checking
+- Socket auto-recovery on errors (reopen and continue)
 
 ## See also
 
