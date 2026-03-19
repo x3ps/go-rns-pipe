@@ -123,8 +123,9 @@ func TestDroppedPacketLogging(t *testing.T) {
 		Logger:               logger,
 		MaxReconnectAttempts: 1,
 	})
-
-	// Do NOT register OnSend — packets stay in the channel until it fills.
+	// No-op handler: drops happen inside the decoder (channel capacity 1)
+	// before readLoop can consume, so the log warning is still triggered.
+	iface.OnSend(func([]byte) error { return nil })
 
 	done := make(chan error, 1)
 	go func() { done <- iface.Start(context.Background()) }()
@@ -217,6 +218,46 @@ func TestDrainPacketsDeliversToCallback(t *testing.T) {
 	}
 }
 
+func TestDrainCallbackErrorLogging(t *testing.T) {
+	t.Parallel()
+
+	// Build a single frame followed by EOF so drainPackets is called.
+	enc := &Encoder{}
+	frame := enc.Encode([]byte("drain-err-test"))
+
+	var logBuf syncBuffer
+	logger := slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	iface := New(Config{
+		Stdin:                bytes.NewReader(frame),
+		Stdout:               &bytes.Buffer{},
+		ReceiveBufferSize:    1,
+		ReconnectDelay:       10 * time.Millisecond,
+		MaxReconnectAttempts: 1,
+		Logger:               logger,
+	})
+
+	callbackErr := errors.New("drain callback failed")
+	iface.OnSend(func([]byte) error {
+		return callbackErr
+	})
+
+	done := make(chan error, 1)
+	go func() { done <- iface.Start(context.Background()) }()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for Start to return")
+	}
+
+	logOutput := string(logBuf.Bytes())
+	if !bytes.Contains(logBuf.Bytes(), []byte("onSend callback error")) &&
+		!bytes.Contains(logBuf.Bytes(), []byte("drain")) {
+		t.Errorf("expected drain callback error warning in log, got: %s", logOutput)
+	}
+}
+
 // errorReader returns a configurable error after writing n bytes.
 type errorReader struct {
 	data []byte
@@ -247,6 +288,7 @@ func TestReadErrorNonEOF(t *testing.T) {
 		MaxReconnectAttempts: 1,
 		Logger:               slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
+	iface.OnSend(func([]byte) error { return nil })
 
 	done := make(chan error, 1)
 	go func() { done <- iface.Start(context.Background()) }()
@@ -281,6 +323,7 @@ func TestNonCloserStdin(t *testing.T) {
 		Stdout: &bytes.Buffer{},
 		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
+	iface.OnSend(func([]byte) error { return nil })
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -308,6 +351,7 @@ func TestOnStatusTransitions(t *testing.T) {
 	t.Parallel()
 
 	iface, stdinW, _ := newTestPipe(t)
+	iface.OnSend(func([]byte) error { return nil })
 
 	var transitions []bool
 	var mu sync.Mutex
