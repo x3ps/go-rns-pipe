@@ -7,37 +7,15 @@ import time
 import pytest
 import RNS
 
-from conftest import ensure_has_path, wait_until
+from conftest import resolve_packet_dest, wait_until
 
 pytestmark = pytest.mark.e2e
-
-
-def _resolve_destination(reflector_hashes):
-    """Resolve the outbound packet destination."""
-    dest_hash = bytes.fromhex(reflector_hashes["dest_hash"])
-
-    ensure_has_path(dest_hash)
-
-    remote_identity = RNS.Identity.recall(dest_hash)
-    if remote_identity is None:
-        identity_hash = bytes.fromhex(reflector_hashes["identity_hash"])
-        remote_identity = RNS.Identity.recall(identity_hash, from_identity_hash=True)
-
-    assert remote_identity is not None, "Could not resolve reflector identity"
-
-    return RNS.Destination(
-        remote_identity,
-        RNS.Destination.OUT,
-        RNS.Destination.SINGLE,
-        "test",
-        "reflector",
-    )
 
 
 @pytest.mark.parametrize("size", [64, 256])
 def test_packet_delivery(rns_client, reflector_hashes, size):
     """Packet delivery receipt == DELIVERED within 10s."""
-    dest = _resolve_destination(reflector_hashes)
+    dest = resolve_packet_dest(reflector_hashes)
 
     if size < 8:
         payload = b"\x00" * size
@@ -59,7 +37,7 @@ def test_packet_delivery(rns_client, reflector_hashes, size):
 
 def test_burst_50_packets(rns_client, reflector_hashes):
     """Burst 50 packets with zero send exceptions."""
-    dest = _resolve_destination(reflector_hashes)
+    dest = resolve_packet_dest(reflector_hashes)
     errors = []
 
     for i in range(50):
