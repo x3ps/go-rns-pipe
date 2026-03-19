@@ -1,6 +1,10 @@
 baseURL = "https://x3ps.github.io/go-rns-pipe/"
 title = "go-rns-pipe"
+languageCode = "en"
 theme = "hextra"
+
+enableRobotsTXT = true
+enableGitInfo = true
 
 defaultContentLanguage = "en"
 defaultContentLanguageInSubdir = false
@@ -29,6 +33,13 @@ defaultContentLanguageInSubdir = false
         base = "https://github.com/x3ps/go-rns-pipe/edit/main/docs/content"
 
 [params]
+  [params.search]
+    enable = true
+    type = "flexsearch"
+    [params.search.flexsearch]
+      index = "content"
+      tokenize = "forward"
+  [params.page]
   [params.navbar]
     displayTitle = true
     displayLogo = false
@@ -38,6 +49,7 @@ defaultContentLanguageInSubdir = false
   [params.highlight]
     [params.highlight.copy]
       enable = true
+      display = "hover"
 
 [menu]
   [[menu.main]]
@@ -64,6 +76,11 @@ defaultContentLanguageInSubdir = false
     weight = 4
     [menu.main.params]
       type = "language-switch"
+
+[sitemap]
+  changefreq = "weekly"
+  filename = "sitemap.xml"
+  priority = 0.5
 
 [markup]
   [markup.highlight]
