@@ -1,6 +1,7 @@
 ---
 title: Custom Transport
 weight: 4
+description: "Build a custom transport using any io.Reader/io.Writer pair, with a WebSocket example."
 ---
 
 `go-rns-pipe` works with any `io.Reader`/`io.Writer` pair. This guide shows how to build a custom transport — using WebSocket as an example.

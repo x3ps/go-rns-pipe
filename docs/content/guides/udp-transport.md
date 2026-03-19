@@ -1,6 +1,7 @@
 ---
 title: UDP Transport
 weight: 3
+description: "Run rns-udp-iface, equivalent to the Python RNS UDPInterface."
 ---
 
 The `examples/udp/` directory contains `rns-udp-iface`, equivalent to Python RNS's `UDPInterface`.

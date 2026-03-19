@@ -1,6 +1,7 @@
 ---
 title: Changelog
 weight: 6
+description: "Release history and changelog for go-rns-pipe."
 ---
 
 ## Unreleased

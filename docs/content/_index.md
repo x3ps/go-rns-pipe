@@ -1,6 +1,7 @@
 ---
 title: go-rns-pipe
 layout: hextra-home
+description: "Go implementation of the Reticulum PipeInterface protocol with HDLC framing."
 ---
 
 {{< hextra/hero-badge link="https://pkg.go.dev/github.com/x3ps/go-rns-pipe" >}}

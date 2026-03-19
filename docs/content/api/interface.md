@@ -1,6 +1,7 @@
 ---
 title: Interface
 weight: 1
+description: "Interface type: reads and writes HDLC packets, reproducing Python PipeInterface behavior."
 ---
 
 `Interface` is the main type. It reads HDLC-framed packets from `stdin` and writes HDLC-framed packets to `stdout`, matching the behavior of Python `PipeInterface.py`.

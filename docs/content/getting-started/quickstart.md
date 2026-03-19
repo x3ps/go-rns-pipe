@@ -1,6 +1,7 @@
 ---
 title: Quick Start
 weight: 2
+description: "Minimal setup for proxying a Reticulum interface through stdin/stdout."
 ---
 
 This guide shows the minimal setup to bridge a Reticulum interface over `stdin`/`stdout`.

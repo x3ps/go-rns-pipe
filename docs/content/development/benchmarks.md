@@ -1,6 +1,7 @@
 ---
 title: Benchmarks
 weight: 4
+description: "Benchmark results and instructions for running performance tests."
 ---
 
 ## Running Benchmarks

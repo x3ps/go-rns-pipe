@@ -1,6 +1,7 @@
 ---
 title: Contributing
 weight: 3
+description: "How to contribute to go-rns-pipe: guidelines and workflow."
 ---
 
 ## Workflow

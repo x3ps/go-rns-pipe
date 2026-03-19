@@ -1,6 +1,7 @@
 ---
 title: Testing
 weight: 2
+description: "Running and writing tests for go-rns-pipe."
 ---
 
 ## Unit Tests

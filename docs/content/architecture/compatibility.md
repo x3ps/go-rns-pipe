@@ -1,6 +1,7 @@
 ---
 title: Python RNS Compatibility
 weight: 3
+description: "Protocol-level compatibility between go-rns-pipe and Python RNS: correspondences and differences."
 ---
 
 `go-rns-pipe` is designed to be wire-compatible with Python RNS. This page documents the exact correspondences and known differences.

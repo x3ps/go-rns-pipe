@@ -1,6 +1,7 @@
 ---
 title: TCP Transport
 weight: 2
+description: "Run the production-ready TCP transport bridge for the Reticulum PipeInterface."
 ---
 
 The `examples/tcp/` directory contains a production-ready TCP transport (`rns-tcp-iface`) that bridges HDLC/pipe traffic to TCP peers.

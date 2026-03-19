@@ -1,6 +1,7 @@
 ---
 title: HDLC Framing
 weight: 1
+description: "HDLC framing scheme used by go-rns-pipe, identical to Python PipeInterface.py."
 ---
 
 `go-rns-pipe` uses a simplified HDLC framing scheme identical to Python `PipeInterface.py`. Understanding the wire format is essential when building custom transports or debugging packet loss.

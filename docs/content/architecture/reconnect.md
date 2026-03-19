@@ -1,6 +1,7 @@
 ---
 title: Reconnect Logic
 weight: 2
+description: "Automatic reconnection strategies: fixed delay and exponential backoff with jitter."
 ---
 
 `go-rns-pipe` implements automatic reconnection with two strategies: fixed delay (default) and exponential backoff with jitter.

@@ -1,6 +1,7 @@
 ---
 title: Errors
 weight: 4
+description: "Sentinel errors exported by go-rns-pipe. Use errors.Is for comparison."
 ---
 
 All sentinel errors are defined in `errors.go`. Use `errors.Is` for comparison.

@@ -1,6 +1,7 @@
 ---
 title: Installation
 weight: 1
+description: "Install go-rns-pipe with go get or in a Nix development shell."
 ---
 
 ## Requirements

@@ -1,6 +1,7 @@
 ---
 title: Config
 weight: 2
+description: "Config struct: all configuration parameters for the Interface, with defaults."
 ---
 
 `Config` holds all configuration for an `Interface`. Pass it to `New`. Zero-value fields are replaced with defaults from `DefaultConfig()`.

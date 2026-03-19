@@ -1,6 +1,7 @@
 ---
 title: HDLC
 weight: 3
+description: "Low-level HDLC framing primitives: Encoder and Decoder for custom transports."
 ---
 
 The `hdlc.go` file provides low-level HDLC framing primitives. Both `Encoder` and `Decoder` are exported so custom transports can reuse the same framing on non-pipe connections (e.g., TCP peers).

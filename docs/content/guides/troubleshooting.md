@@ -1,6 +1,7 @@
 ---
 title: Troubleshooting
 weight: 5
+description: "Diagnose and fix common issues with go-rns-pipe."
 ---
 
 ## Packets Dropped (`DroppedPackets() > 0`)

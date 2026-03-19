@@ -1,6 +1,7 @@
 ---
 title: Development Setup
 weight: 1
+description: "Set up a local development environment for go-rns-pipe."
 ---
 
 ## Requirements

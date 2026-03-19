@@ -1,6 +1,7 @@
 ---
 title: rnsd Integration
 weight: 1
+description: "Integrate go-rns-pipe with the Reticulum daemon (rnsd)."
 ---
 
 This guide explains how `go-rns-pipe` programs integrate with the Reticulum daemon (`rnsd`).
