@@ -701,6 +701,82 @@ func (w *shortWriter) Write(p []byte) (int, error) {
 	return len(p) - 1, nil
 }
 
+// TestMetricsCounters verifies that PacketsSent, PacketsReceived, BytesSent,
+// and BytesReceived are correctly incremented during normal operation.
+func TestMetricsCounters(t *testing.T) {
+	stdinR, stdinW := io.Pipe()
+	stdoutR, stdoutW := io.Pipe()
+
+	iface := New(Config{
+		Stdin:  stdinR,
+		Stdout: stdoutW,
+	})
+
+	received := make(chan struct{}, 1)
+	iface.OnSend(func(pkt []byte) error {
+		select {
+		case received <- struct{}{}:
+		default:
+		}
+		return nil
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() { done <- iface.Start(ctx) }()
+
+	waitOnline(t, iface)
+
+	// Drain stdout in background.
+	go func() {
+		buf := make([]byte, 4096)
+		for {
+			if _, err := stdoutR.Read(buf); err != nil {
+				return
+			}
+		}
+	}()
+
+	// Send an outbound packet.
+	outPayload := []byte("metrics-out")
+	if err := iface.Receive(outPayload); err != nil {
+		t.Fatalf("Receive: %v", err)
+	}
+
+	if iface.PacketsSent() != 1 {
+		t.Errorf("PacketsSent = %d, want 1", iface.PacketsSent())
+	}
+	if iface.BytesSent() != uint64(len(outPayload)) {
+		t.Errorf("BytesSent = %d, want %d", iface.BytesSent(), len(outPayload))
+	}
+
+	// Send an inbound packet via stdin.
+	enc := &Encoder{}
+	inPayload := []byte("metrics-in")
+	if _, err := stdinW.Write(enc.Encode(inPayload)); err != nil {
+		t.Fatalf("write inbound: %v", err)
+	}
+
+	select {
+	case <-received:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for inbound packet")
+	}
+
+	if iface.PacketsReceived() != 1 {
+		t.Errorf("PacketsReceived = %d, want 1", iface.PacketsReceived())
+	}
+	if iface.BytesReceived() != uint64(len(inPayload)) {
+		t.Errorf("BytesReceived = %d, want %d", iface.BytesReceived(), len(inPayload))
+	}
+
+	cancel()
+	_ = stdinW.Close()
+	<-done
+}
+
 // syncWriter is a thread-safe bytes.Buffer for concurrent writes.
 type syncWriter struct {
 	mu  sync.Mutex
