@@ -1,3 +1,3 @@
 module github.com/x3ps/go-rns-pipe
 
-go 1.25
+go 1.26
