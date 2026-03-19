@@ -18,10 +18,14 @@ func discardLogger() *slog.Logger {
 }
 
 func newTestIface(stdin io.Reader, stdout io.Writer) *rnspipe.Interface {
-	return rnspipe.New(rnspipe.Config{
+	iface := rnspipe.New(rnspipe.Config{
 		Stdin:  stdin,
 		Stdout: stdout,
 	})
+	// Set a no-op handler so Start doesn't return ErrNoHandler.
+	// Transport goroutines (runClient/runServer) will overwrite this.
+	iface.OnSend(func([]byte) error { return nil })
+	return iface
 }
 
 // TestClientSendWhileDisconnected verifies that clientConn.send returns
@@ -141,6 +145,9 @@ func TestServerMultiClientBroadcast(t *testing.T) {
 		Stdout: stdoutW,
 		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
+	// Set a no-op handler so Start doesn't return ErrNoHandler.
+	// runServer will overwrite this with the real broadcast handler.
+	iface.OnSend(func([]byte) error { return nil })
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
