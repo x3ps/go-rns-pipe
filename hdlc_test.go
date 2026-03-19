@@ -466,7 +466,7 @@ func BenchmarkDecode(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		dec := NewDecoder(1064, 1)
-		dec.Write(frame)
+		_, _ = dec.Write(frame)
 		<-dec.Packets()
 		dec.Close()
 	}
@@ -482,7 +482,7 @@ func BenchmarkRoundTrip(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		frame := enc.Encode(payload)
 		dec := NewDecoder(1064, 1)
-		dec.Write(frame)
+		_, _ = dec.Write(frame)
 		<-dec.Packets()
 		dec.Close()
 	}
