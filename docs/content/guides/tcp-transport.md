@@ -35,18 +35,41 @@ Or with Go directly:
 go build -o rns-tcp-iface ./examples/tcp/
 ```
 
+## CLI Flags
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--mode` | (required) | `client` or `server` |
+| `--listen-addr` | `:4242` | Listen address (server mode) |
+| `--peer-addr` | (required in client) | Remote TCP address to connect to |
+| `--name` | `TCPInterface` | Interface name reported to RNS |
+| `--mtu` | `500` | RNS packet MTU in bytes |
+| `--reconnect-delay` | `5s` | Base reconnect delay (client mode) |
+| `--log-level` | `info` | Log verbosity: `debug`/`info`/`warn`/`error` |
+
+## Environment Variables
+
+| Variable | Flag equivalent |
+|----------|----------------|
+| `RNS_TCP_MODE` | `--mode` |
+| `RNS_TCP_NAME` | `--name` |
+| `RNS_TCP_LISTEN_ADDR` | `--listen-addr` |
+| `RNS_TCP_PEER_ADDR` | `--peer-addr` |
+
+CLI flags take priority over environment variables.
+
 ## Usage
 
 **Client mode** (connect to a remote RNS node):
 
 ```bash
-rns-tcp-iface --mode client --addr remote.host:4242 --name TCPClient
+rns-tcp-iface --mode client --peer-addr remote.host:4242 --name TCPClient
 ```
 
 **Server mode** (accept connections from remote nodes):
 
 ```bash
-rns-tcp-iface --mode server --addr 0.0.0.0:4242 --name TCPServer
+rns-tcp-iface --mode server --listen-addr 0.0.0.0:4242 --name TCPServer
 ```
 
 ## rnsd Configuration
@@ -56,7 +79,7 @@ rns-tcp-iface --mode server --addr 0.0.0.0:4242 --name TCPServer
   type = PipeInterface
   enabled = yes
   respawn_delay = 5
-  command = /usr/local/bin/rns-tcp-iface --mode client --addr remote.host:4242 --name TCPBridge
+  command = /usr/local/bin/rns-tcp-iface --mode client --peer-addr remote.host:4242 --name TCPBridge
 ```
 
 ## Implementation Highlights
