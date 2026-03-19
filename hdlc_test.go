@@ -444,6 +444,50 @@ func TestDecoderHWMTUBoundaryExact(t *testing.T) {
 	}
 }
 
+func BenchmarkEncode(b *testing.B) {
+	enc := &Encoder{}
+	payload := make([]byte, 500) // typical RNS MTU
+	for i := range payload {
+		payload[i] = byte(i)
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		enc.Encode(payload)
+	}
+}
+
+func BenchmarkDecode(b *testing.B) {
+	enc := &Encoder{}
+	payload := make([]byte, 500)
+	for i := range payload {
+		payload[i] = byte(i)
+	}
+	frame := enc.Encode(payload)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		dec := NewDecoder(1064, 1)
+		dec.Write(frame)
+		<-dec.Packets()
+		dec.Close()
+	}
+}
+
+func BenchmarkRoundTrip(b *testing.B) {
+	enc := &Encoder{}
+	payload := make([]byte, 500)
+	for i := range payload {
+		payload[i] = byte(i)
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		frame := enc.Encode(payload)
+		dec := NewDecoder(1064, 1)
+		dec.Write(frame)
+		<-dec.Packets()
+		dec.Close()
+	}
+}
+
 func TestDecoderDropMultiple(t *testing.T) {
 	t.Parallel()
 
