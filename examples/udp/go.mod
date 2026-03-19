@@ -1,6 +1,6 @@
 module github.com/x3ps/go-rns-pipe/examples/udp
 
-go 1.24
+go 1.26
 
 require github.com/x3ps/go-rns-pipe v0.0.0
 
