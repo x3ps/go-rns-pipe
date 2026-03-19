@@ -777,6 +777,54 @@ func TestMetricsCounters(t *testing.T) {
 	<-done
 }
 
+// TestConcurrentDoubleStart verifies that calling Start() concurrently from
+// multiple goroutines does not cause a data race or panic. Exactly one call
+// should succeed and the other should return ErrAlreadyStarted.
+func TestConcurrentDoubleStart(t *testing.T) {
+	stdinR, stdinW := io.Pipe()
+	var stdout bytes.Buffer
+
+	iface := New(Config{
+		Stdin:  stdinR,
+		Stdout: &stdout,
+	})
+	iface.OnSend(func([]byte) error { return nil })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	const goroutines = 2
+	results := make(chan error, goroutines)
+	for range goroutines {
+		go func() {
+			results <- iface.Start(ctx)
+		}()
+	}
+
+	// Wait until at least one goroutine is running (interface online)
+	// or one returns ErrAlreadyStarted quickly.
+	time.Sleep(50 * time.Millisecond)
+
+	cancel()
+	_ = stdinW.Close()
+
+	var alreadyStartedCount int
+	for range goroutines {
+		select {
+		case err := <-results:
+			if errors.Is(err, ErrAlreadyStarted) {
+				alreadyStartedCount++
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("timeout waiting for Start goroutines")
+		}
+	}
+
+	if alreadyStartedCount != 1 {
+		t.Fatalf("expected exactly 1 ErrAlreadyStarted, got %d", alreadyStartedCount)
+	}
+}
+
 // syncWriter is a thread-safe bytes.Buffer for concurrent writes.
 type syncWriter struct {
 	mu  sync.Mutex
