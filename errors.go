@@ -22,4 +22,8 @@ var (
 	// ExitOnEOF is true. It signals that rnsd closed the pipe intentionally
 	// and the process should exit (rnsd will respawn via respawn_delay).
 	ErrPipeClosed = errors.New("pipe closed by remote")
+
+	// ErrNoHandler is returned by Start when OnSend has not been registered.
+	// The handler must be set before Start to avoid silent packet loss.
+	ErrNoHandler = errors.New("OnSend handler not registered")
 )

@@ -63,7 +63,7 @@ func main() {
 | Method | Signature | Description |
 |---|---|---|
 | `New` | `New(Config) *Interface` | Create an interface with defaults applied |
-| `Start` | `Start(ctx) error` | Block reading HDLC frames from Stdin; reconnects on failure |
+| `Start` | `Start(ctx) error` | Block reading HDLC frames from Stdin; reconnects on failure. Requires `OnSend` to be registered first |
 | `Receive` | `Receive([]byte) error` | HDLC-encode a packet and write it to Stdout (toward rnsd) |
 | `OnSend` | `OnSend(func([]byte) error)` | Register callback for packets decoded from Stdin |
 | `OnStatus` | `OnStatus(func(bool))` | Register callback for online/offline transitions |
@@ -106,6 +106,7 @@ The `Encoder` and `Decoder` are available for building custom transports:
 |---|---|
 | `ErrNotStarted` | Operation attempted before `Start` |
 | `ErrAlreadyStarted` | `Start` called on a running interface |
+| `ErrNoHandler` | `Start` called without registering `OnSend` first |
 | `ErrMaxReconnectAttemptsReached` | All reconnect attempts exhausted |
 | `ErrOffline` | `Receive` called while interface is offline (e.g. during reconnect) |
 | `ErrPipeClosed` | Clean EOF with `ExitOnEOF=true`; rnsd closed the pipe |
