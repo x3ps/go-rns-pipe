@@ -59,6 +59,64 @@ class EchoMessage(RNS.MessageBase):
 
 
 # ---------------------------------------------------------------------------
+# Shared link/destination helpers
+# ---------------------------------------------------------------------------
+
+def establish_link(reflector_hashes):
+    """Establish a link to the reflector's link destination."""
+    dest_hash = bytes.fromhex(reflector_hashes["link_dest_hash"])
+
+    ensure_has_path(dest_hash)
+
+    remote_identity = RNS.Identity.recall(dest_hash)
+    if remote_identity is None:
+        identity_hash = bytes.fromhex(reflector_hashes["identity_hash"])
+        remote_identity = RNS.Identity.recall(identity_hash, from_identity_hash=True)
+
+    assert remote_identity is not None, "Could not resolve link destination identity"
+
+    dest = RNS.Destination(
+        remote_identity,
+        RNS.Destination.OUT,
+        RNS.Destination.SINGLE,
+        "test",
+        "server",
+    )
+
+    link = RNS.Link(dest)
+
+    wait_until(
+        lambda: link.status == RNS.Link.ACTIVE,
+        timeout=30,
+        desc="link ACTIVE",
+    )
+
+    return link
+
+
+def resolve_packet_dest(reflector_hashes):
+    """Resolve the outbound packet destination."""
+    dest_hash = bytes.fromhex(reflector_hashes["dest_hash"])
+
+    ensure_has_path(dest_hash)
+
+    remote_identity = RNS.Identity.recall(dest_hash)
+    if remote_identity is None:
+        identity_hash = bytes.fromhex(reflector_hashes["identity_hash"])
+        remote_identity = RNS.Identity.recall(identity_hash, from_identity_hash=True)
+
+    assert remote_identity is not None, "Could not resolve reflector identity"
+
+    return RNS.Destination(
+        remote_identity,
+        RNS.Destination.OUT,
+        RNS.Destination.SINGLE,
+        "test",
+        "reflector",
+    )
+
+
+# ---------------------------------------------------------------------------
 # Session-scoped fixtures
 # ---------------------------------------------------------------------------
 
