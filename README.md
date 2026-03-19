@@ -172,6 +172,35 @@ nix develop   # provides go, golangci-lint, docker-compose, python + rns venv
 | `make e2e-tcp` | Run TCP E2E tests only |
 | `make e2e-udp` | Run UDP E2E tests only |
 
+## Third-party components
+
+The main library has **no external Go dependencies** — it uses only the Go standard library.
+
+### Protocol reference
+
+| Component | Author | License | Repository |
+|---|---|---|---|
+| Reticulum Network Stack | Mark Qvist | MIT | [markqvist/Reticulum](https://github.com/markqvist/Reticulum) |
+
+This library implements the PipeInterface wire protocol defined by Reticulum. No Reticulum source code is copied or included.
+
+### E2E test dependencies (Python)
+
+| Component | Author | License | Repository |
+|---|---|---|---|
+| `rns` | Mark Qvist | MIT | [markqvist/Reticulum](https://github.com/markqvist/Reticulum) |
+| `pytest` | pytest-dev team | MIT | [pytest-dev/pytest](https://github.com/pytest-dev/pytest) |
+| `pytest-timeout` | Floris Bruynooghe | MIT | [pytest-dev/pytest-timeout](https://github.com/pytest-dev/pytest-timeout) |
+
+### Development tools
+
+| Tool | Author | License | Repository |
+|---|---|---|---|
+| Go | The Go Authors | BSD-3-Clause | [golang/go](https://github.com/golang/go) |
+| golangci-lint | golangci | MIT | [golangci/golangci-lint](https://github.com/golangci/golangci-lint) |
+| Docker | Docker Inc. | Apache-2.0 | [docker/docker](https://github.com/docker/docker) |
+| Podman | Red Hat / containers | Apache-2.0 | [containers/podman](https://github.com/containers/podman) |
+
 ## License
 
 [AGPL-3.0](LICENSE)
