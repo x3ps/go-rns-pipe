@@ -1,0 +1,40 @@
+baseURL = "https://x3ps.github.io/go-rns-pipe/"
+languageCode = "en-us"
+title = "go-rns-pipe"
+theme = "hextra"
+
+[params]
+  description = "Go implementation of the Reticulum PipeInterface protocol with HDLC framing"
+  editURL = "https://github.com/x3ps/go-rns-pipe/edit/main/docs/content/"
+
+[params.navbar]
+  displayTitle = true
+  displayLogo = false
+
+[params.footer]
+  displayCopyright = true
+  displayPoweredBy = true
+
+[params.highlight]
+  copy = true
+
+[menu]
+  [[menu.main]]
+    name = "Docs"
+    pageRef = "/getting-started"
+    weight = 1
+  [[menu.main]]
+    name = "API"
+    pageRef = "/api"
+    weight = 2
+  [[menu.main]]
+    name = "GitHub"
+    url = "https://github.com/x3ps/go-rns-pipe"
+    weight = 3
+    [menu.main.params]
+      type = "icon"
+      icon = "github"
+
+[markup]
+  [markup.highlight]
+    noClasses = false
