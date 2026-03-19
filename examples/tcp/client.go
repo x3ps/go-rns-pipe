@@ -137,10 +137,12 @@ func dial(ctx context.Context, addr string) (net.Conn, error) {
 // sleepBackoff waits for an exponential backoff duration with jitter.
 func sleepBackoff(ctx context.Context, base time.Duration, attempt int) error {
 	delay := backoff(base, attempt)
+	timer := time.NewTimer(delay)
 	select {
 	case <-ctx.Done():
+		timer.Stop()
 		return ctx.Err()
-	case <-time.After(delay):
+	case <-timer.C:
 		return nil
 	}
 }

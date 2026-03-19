@@ -34,10 +34,12 @@ func (r *reconnector) run(ctx context.Context, fn func() error) error {
 			r.logger.Info("attempting reconnect", "attempt", attempt, "delay", delay)
 		}
 
+		timer := time.NewTimer(delay)
 		select {
 		case <-ctx.Done():
+			timer.Stop()
 			return ctx.Err()
-		case <-time.After(delay):
+		case <-timer.C:
 		}
 
 		if err := fn(); err != nil {
