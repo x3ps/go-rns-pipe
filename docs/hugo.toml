@@ -36,7 +36,8 @@ defaultContentLanguageInSubdir = false
     displayCopyright = true
     displayPoweredBy = true
   [params.highlight]
-    copy = true
+    [params.highlight.copy]
+      enable = true
 
 [menu]
   [[menu.main]]
