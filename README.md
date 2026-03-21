@@ -126,39 +126,17 @@ Add a `PipeInterface` section to `~/.reticulum/config`:
 
 The binary communicates with rnsd over stdin/stdout using HDLC framing.
 
-## Examples
-
-- **[examples/tcp/](examples/tcp/README.md)** — TCP transport with client/server modes, keepalive tuning, and reconnect logic. Equivalent to Python `TCPClientInterface`/`TCPServerInterface`.
-- **[examples/udp/](examples/udp/README.md)** — Minimal UDP transport with broadcast support. Equivalent to Python `UDPInterface`.
-
-## Architecture Notes
-
-### TCP server broadcast semantics
-
-Upstream `TCPServerInterface.py` spawns a separate `TCPClientInterface` (a distinct rnsd interface
-registration) for each accepted TCP client. This process has a single stdin/stdout pipe to rnsd —
-one RNS interface for the whole process — so broadcasting to all connected TCP clients is the
-correct behaviour. Inbound traffic (client -> rnsd via `iface.Receive`) remains per-connection.
-
-### Remaining behavioural differences from official Reticulum
-
-| Area | Difference |
-|---|---|
-| TCP keepalive tuning | Non-Linux platforms lack `TCP_KEEPINTVL`, `TCP_KEEPCNT`, and `TCP_USER_TIMEOUT` tuning (no-op stub in `transport_other.go`); Linux matches Python exactly |
-| UDP multicast | Not implemented (only broadcast); matches Python `UDPInterface.py` |
-
 ## Development
 
 ### Requirements
 
 - [Go](https://go.dev/) 1.26+
-- [Docker](https://www.docker.com/) or [Podman](https://podman.io/) (for E2E tests)
 - [golangci-lint](https://golangci-lint.run/) (for linting)
 
 Or use the Nix development shell:
 
 ```bash
-nix develop   # provides go, golangci-lint, docker-compose, python + rns venv
+nix develop   # provides go, golangci-lint
 ```
 
 ### Make targets
@@ -167,10 +145,6 @@ nix develop   # provides go, golangci-lint, docker-compose, python + rns venv
 |---|---|
 | `make test` | Run unit tests (includes race detector) |
 | `make lint` | Run `go vet` and `golangci-lint` |
-| `make build` | Build `rns-tcp-iface` and `rns-udp-iface` binaries |
-| `make e2e` | Run all E2E tests (requires container runtime) |
-| `make e2e-tcp` | Run TCP E2E tests only |
-| `make e2e-udp` | Run UDP E2E tests only |
 
 ## Third-party components
 
@@ -184,22 +158,12 @@ The main library has **no external Go dependencies** — it uses only the Go sta
 
 This library implements the PipeInterface wire protocol defined by Reticulum. No Reticulum source code is copied or included.
 
-### E2E test dependencies (Python)
-
-| Component | Author | License | Repository |
-|---|---|---|---|
-| `rns` | Mark Qvist | MIT | [markqvist/Reticulum](https://github.com/markqvist/Reticulum) |
-| `pytest` | pytest-dev team | MIT | [pytest-dev/pytest](https://github.com/pytest-dev/pytest) |
-| `pytest-timeout` | Floris Bruynooghe | MIT | [pytest-dev/pytest-timeout](https://github.com/pytest-dev/pytest-timeout) |
-
 ### Development tools
 
 | Tool | Author | License | Repository |
 |---|---|---|---|
 | Go | The Go Authors | BSD-3-Clause | [golang/go](https://github.com/golang/go) |
 | golangci-lint | golangci | MIT | [golangci/golangci-lint](https://github.com/golangci/golangci-lint) |
-| Docker | Docker Inc. | Apache-2.0 | [docker/docker](https://github.com/docker/docker) |
-| Podman | Red Hat / containers | Apache-2.0 | [containers/podman](https://github.com/containers/podman) |
 
 ## License
 
