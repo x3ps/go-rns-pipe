@@ -1,8 +1,12 @@
-.PHONY: test lint
+.PHONY: test lint coverage
 
 test:
 	go test ./...
 	go test -race ./...
+
+coverage:
+	go test -coverprofile=coverage.out ./...
+	go tool cover -func=coverage.out
 
 lint:
 	go vet ./...

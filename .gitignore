@@ -8,15 +8,7 @@
 *.out
 vendor/
 
-# tests
-.venv*/
-venv/
-.pytest_cache/
 coverage.out
-.coverage
-htmlcov/
-__pycache__/
-*.pyc
 
 # local tools
 .claude/
