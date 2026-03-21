@@ -187,4 +187,4 @@ This library implements the PipeInterface wire protocol defined by Reticulum. No
 
 ## License
 
-[AGPL-3.0](LICENSE)
+[MIT](LICENSE)
