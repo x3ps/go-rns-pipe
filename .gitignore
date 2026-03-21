@@ -1,9 +1,3 @@
-# Build outputs
-rns-tcp-iface
-rns-udp-iface
-examples/tcp/tcp
-examples/udp/udp
-
 # Go
 *.exe
 *.exe~
@@ -23,12 +17,6 @@ coverage.out
 htmlcov/
 __pycache__/
 *.pyc
-
-# Hugo
-public/
-docs/public/
-.hugo_build.lock
-docs/.hugo_build.lock
 
 # local tools
 .claude/

@@ -15,33 +15,12 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Root — test
-        run: make test-root
-      - name: Root — lint
+      - name: Test
+        run: make test
+      - name: Lint
         uses: golangci/golangci-lint-action@v9
         with:
           version: latest
-
-      - name: TCP — test
-        run: go test ./... && go test -race ./...
-        working-directory: examples/tcp
-      - name: TCP — lint
-        uses: golangci/golangci-lint-action@v9
-        with:
-          version: latest
-          working-directory: examples/tcp
-
-      - name: UDP — test
-        run: go test ./... && go test -race ./...
-        working-directory: examples/udp
-      - name: UDP — lint
-        uses: golangci/golangci-lint-action@v9
-        with:
-          version: latest
-          working-directory: examples/udp
-
-      - name: Build
-        run: make build
 
   release:
     needs: [validate]
@@ -50,19 +29,10 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v6
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
 
-      - name: Build
-        run: make build
-
-      - name: Create release & upload
+      - name: Create release
         run: |
           gh release view "${{ github.ref_name }}" >/dev/null 2>&1 || \
             gh release create "${{ github.ref_name }}" --generate-notes
-          gh release upload "${{ github.ref_name }}" --clobber \
-            examples/tcp/rns-tcp-iface \
-            examples/udp/rns-udp-iface
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
