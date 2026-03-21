@@ -65,12 +65,32 @@ func main() {
 | `New` | `New(Config) *Interface` | Create an interface with defaults applied |
 | `Start` | `Start(ctx) error` | Block reading HDLC frames from Stdin; reconnects on failure. Requires `OnSend` to be registered first |
 | `Receive` | `Receive([]byte) error` | HDLC-encode a packet and write it to Stdout (toward rnsd) |
+| `SetOnline` | `SetOnline(bool)` | Signal transport-layer up/down (see below) |
 | `OnSend` | `OnSend(func([]byte) error)` | Register callback for packets decoded from Stdin |
 | `OnStatus` | `OnStatus(func(bool))` | Register callback for online/offline transitions |
 | `IsOnline` | `IsOnline() bool` | Whether the interface is currently online |
 | `Name` | `Name() string` | Interface name |
 | `MTU` | `MTU() int` | Configured MTU |
 | `HWMTU` | `HWMTU() int` | Configured hardware MTU |
+
+### Online state
+
+The interface tracks two independent bits:
+
+- **pipe side** — managed internally by `Start`/`readLoop`; goes down on read errors and up on reconnect.
+- **transport side** — managed by the caller via `SetOnline`; defaults to `true`.
+
+The effective online state (returned by `IsOnline`, checked by `Receive`, reported by `OnStatus`) is `pipe && transport`. This means a transport adapter can independently signal network up/down without interfering with the pipe reconnect logic.
+
+```go
+// TCP disconnect — stop accepting packets from rnsd.
+iface.SetOnline(false)
+
+// TCP reconnected — resume normal operation.
+iface.SetOnline(true)
+```
+
+`OnStatus` fires only when the effective state actually changes, so redundant `SetOnline` calls do not produce spurious callbacks. Callers that never invoke `SetOnline` observe no change in behaviour (transport side stays `true`).
 
 ### Configuration
 
