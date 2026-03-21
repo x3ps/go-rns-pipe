@@ -21,26 +21,8 @@ jobs:
           go-version-file: go.mod
 
       - name: Root — test
-        run: make test-root
+        run: make test
       - name: Root — lint
         uses: golangci/golangci-lint-action@v9
         with:
           version: latest
-
-      - name: TCP — test
-        run: go test ./... && go test -race ./...
-        working-directory: examples/tcp
-      - name: TCP — lint
-        uses: golangci/golangci-lint-action@v9
-        with:
-          version: latest
-          working-directory: examples/tcp
-
-      - name: UDP — test
-        run: go test ./... && go test -race ./...
-        working-directory: examples/udp
-      - name: UDP — lint
-        uses: golangci/golangci-lint-action@v9
-        with:
-          version: latest
-          working-directory: examples/udp
