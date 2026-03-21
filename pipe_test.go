@@ -825,6 +825,218 @@ func TestConcurrentDoubleStart(t *testing.T) {
 	}
 }
 
+// TestSetOnlineTransportDown verifies that SetOnline(false) while the pipe is
+// up makes IsOnline return false and Receive return ErrOffline, and that
+// SetOnline(true) restores normal operation.
+func TestSetOnlineTransportDown(t *testing.T) {
+	stdinR, stdinW := io.Pipe()
+	var stdout syncWriter
+
+	iface := New(Config{
+		Stdin:  stdinR,
+		Stdout: &stdout,
+	})
+	iface.OnSend(func([]byte) error { return nil })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() { done <- iface.Start(ctx) }()
+	waitOnline(t, iface)
+
+	// Transport goes down while pipe is healthy.
+	iface.SetOnline(false)
+	if iface.IsOnline() {
+		t.Fatal("expected offline after SetOnline(false)")
+	}
+	if err := iface.Receive([]byte("test")); !errors.Is(err, ErrOffline) {
+		t.Fatalf("expected ErrOffline, got %v", err)
+	}
+
+	// Transport comes back up.
+	iface.SetOnline(true)
+	if !iface.IsOnline() {
+		t.Fatal("expected online after SetOnline(true)")
+	}
+	if err := iface.Receive([]byte("test")); err != nil {
+		t.Fatalf("Receive after reconnect: %v", err)
+	}
+
+	cancel()
+	_ = stdinW.Close()
+	<-done
+}
+
+// TestSetOnlineNoSpuriousCallback verifies that repeated SetOnline calls that
+// do not change the effective state do not fire the onStatus callback.
+func TestSetOnlineNoSpuriousCallback(t *testing.T) {
+	stdinR, stdinW := io.Pipe()
+	var stdout syncWriter
+
+	iface := New(Config{
+		Stdin:  stdinR,
+		Stdout: &stdout,
+	})
+	iface.OnSend(func([]byte) error { return nil })
+
+	var callbackCount int
+	var cbMu sync.Mutex
+	iface.OnStatus(func(bool) {
+		cbMu.Lock()
+		callbackCount++
+		cbMu.Unlock()
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() { done <- iface.Start(ctx) }()
+	waitOnline(t, iface)
+
+	// One online callback was fired by Start.
+	cbMu.Lock()
+	before := callbackCount
+	cbMu.Unlock()
+
+	// Redundant SetOnline(true) while already online — no new callback.
+	iface.SetOnline(true)
+	iface.SetOnline(true)
+
+	// SetOnline(false) → one callback (effective: true→false).
+	iface.SetOnline(false)
+	// Another SetOnline(false) — no change.
+	iface.SetOnline(false)
+
+	// SetOnline(true) → one callback (effective: false→true).
+	iface.SetOnline(true)
+
+	cbMu.Lock()
+	after := callbackCount
+	cbMu.Unlock()
+
+	// Expect exactly 2 extra callbacks: one offline, one online.
+	if extra := after - before; extra != 2 {
+		t.Fatalf("expected 2 extra callbacks, got %d", extra)
+	}
+
+	cancel()
+	_ = stdinW.Close()
+	<-done
+}
+
+// TestSetOnlineWhilePipeDown verifies that SetOnline(false/true) when the pipe
+// is already down does not fire spurious callbacks.
+func TestSetOnlineWhilePipeDown(t *testing.T) {
+	stdinR, stdinW := io.Pipe()
+	var stdout syncWriter
+
+	iface := New(Config{
+		Stdin:                stdinR,
+		Stdout:               &stdout,
+		MaxReconnectAttempts: 1,
+		ReconnectDelay:       50 * time.Millisecond,
+	})
+	iface.OnSend(func([]byte) error { return nil })
+
+	var offlineCount int
+	var cbMu sync.Mutex
+	iface.OnStatus(func(online bool) {
+		if !online {
+			cbMu.Lock()
+			offlineCount++
+			cbMu.Unlock()
+		}
+	})
+
+	done := make(chan error, 1)
+	go func() { done <- iface.Start(context.Background()) }()
+	waitOnline(t, iface)
+
+	// Force pipe down via EOF — triggers one offline callback.
+	_ = stdinW.Close()
+	deadline := time.After(2 * time.Second)
+	for iface.IsOnline() {
+		select {
+		case <-deadline:
+			t.Fatal("timeout waiting for pipe offline")
+		default:
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+
+	cbMu.Lock()
+	countAfterPipeDown := offlineCount
+	cbMu.Unlock()
+
+	// Now toggle transport while pipe is already down — effective state stays false.
+	iface.SetOnline(false)
+	iface.SetOnline(true)
+
+	cbMu.Lock()
+	final := offlineCount
+	cbMu.Unlock()
+
+	if final != countAfterPipeDown {
+		t.Fatalf("expected no extra offline callbacks, got %d extra", final-countAfterPipeDown)
+	}
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for Start to return")
+	}
+}
+
+// TestSetOnlineConcurrent exercises SetOnline concurrently with Receive and
+// Start/Stop to confirm the race detector finds no issues.
+func TestSetOnlineConcurrent(t *testing.T) {
+	stdinR, stdinW := io.Pipe()
+	var stdout syncWriter
+
+	iface := New(Config{
+		Stdin:  stdinR,
+		Stdout: &stdout,
+	})
+	iface.OnSend(func([]byte) error { return nil })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- iface.Start(ctx) }()
+	waitOnline(t, iface)
+
+	var wg sync.WaitGroup
+
+	// Goroutines toggling transport online state.
+	for range 10 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for range 100 {
+				iface.SetOnline(false)
+				iface.SetOnline(true)
+			}
+		}()
+	}
+
+	// Goroutines calling Receive (may get ErrOffline — that's fine).
+	for range 10 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for range 100 {
+				_ = iface.Receive([]byte{0x01})
+			}
+		}()
+	}
+
+	wg.Wait()
+	cancel()
+	_ = stdinW.Close()
+	<-done
+}
+
 // syncWriter is a thread-safe bytes.Buffer for concurrent writes.
 type syncWriter struct {
 	mu  sync.Mutex

@@ -17,11 +17,12 @@ import (
 // Interface implements the RNS PipeInterface protocol. It reads HDLC-framed
 // packets from Stdin and writes HDLC-framed packets to Stdout.
 type Interface struct {
-	config   Config
-	mu       sync.RWMutex  // protects: online, started, onSend, onStatus, cancelFn
-	writeMu  sync.Mutex    // serializes Stdout writes in Receive()
-	online   bool
-	started  bool
+	config          Config
+	mu              sync.RWMutex // protects: pipeOnline, transportOnline, started, onSend, onStatus, cancelFn
+	writeMu         sync.Mutex   // serializes Stdout writes in Receive()
+	pipeOnline      bool         // pipe side to rnsd; controlled by Start()/readLoop()
+	transportOnline bool         // network side; controlled by SetOnline()
+	started         bool
 	encoder  Encoder
 	onSend   func([]byte) error // called when a decoded packet arrives from stdin
 	onStatus func(bool)         // called on online/offline transitions
@@ -83,8 +84,9 @@ func New(config Config) *Interface {
 	}
 
 	return &Interface{
-		config: config,
-		logger: logger.With("interface", config.Name),
+		config:          config,
+		logger:          logger.With("interface", config.Name),
+		transportOnline: true, // network side assumed healthy until told otherwise
 	}
 }
 
@@ -123,7 +125,7 @@ func (iface *Interface) Start(ctx context.Context) error {
 	iface.mu.Unlock()
 
 	defer func() {
-		iface.setOnline(false) // safety net — before clearing started so no new Start() races
+		iface.setPipeOnline(false) // safety net — before clearing started so no new Start() races
 		iface.mu.Lock()
 		iface.started = false
 		iface.cancelFn = nil
@@ -138,9 +140,9 @@ func (iface *Interface) Start(ctx context.Context) error {
 	}
 
 	return recon.run(ctx, func() error {
-		iface.setOnline(true)
+		iface.setPipeOnline(true)
 		err := iface.readLoop(ctx)
-		iface.setOnline(false)
+		iface.setPipeOnline(false)
 		return err // nil = ctx cancelled; io.EOF / other error = reconnect
 	})
 }
@@ -247,7 +249,7 @@ func (iface *Interface) drainPackets(decoder *Decoder) {
 func (iface *Interface) Receive(packet []byte) error {
 	iface.mu.RLock()
 	started := iface.started
-	online := iface.online
+	online := iface.pipeOnline && iface.transportOnline
 	iface.mu.RUnlock()
 
 	if !started {
@@ -275,11 +277,12 @@ func (iface *Interface) Receive(packet []byte) error {
 	return nil
 }
 
-// IsOnline returns whether the interface is currently online.
+// IsOnline returns whether the interface is currently online. The effective
+// online state is the conjunction of the pipe side and the transport side.
 func (iface *Interface) IsOnline() bool {
 	iface.mu.RLock()
 	defer iface.mu.RUnlock()
-	return iface.online
+	return iface.pipeOnline && iface.transportOnline
 }
 
 // Name returns the interface name.
@@ -309,14 +312,36 @@ func (iface *Interface) BytesSent() uint64 { return iface.bytesSent.Load() }
 // BytesReceived returns the total payload bytes received from stdin (after HDLC decoding).
 func (iface *Interface) BytesReceived() uint64 { return iface.bytesReceived.Load() }
 
-func (iface *Interface) setOnline(online bool) {
+// SetOnline sets the transport-side online state. Call SetOnline(false) when
+// the network side goes down (e.g. TCP disconnect, no UDP peers) and
+// SetOnline(true) when connectivity is restored. The effective online state
+// is the conjunction of the pipe side and the transport side; the onStatus
+// callback fires only on actual effective-state transitions.
+//
+// The default transport state is true (set in New), so callers that never
+// invoke SetOnline observe no change in behaviour.
+func (iface *Interface) SetOnline(online bool) {
 	iface.mu.Lock()
-	changed := iface.online != online
-	iface.online = online
+	prev := iface.pipeOnline && iface.transportOnline
+	iface.transportOnline = online
+	curr := iface.pipeOnline && iface.transportOnline
 	cb := iface.onStatus
 	iface.mu.Unlock()
 
-	if changed && cb != nil {
-		cb(online)
+	if prev != curr && cb != nil {
+		cb(curr)
+	}
+}
+
+func (iface *Interface) setPipeOnline(online bool) {
+	iface.mu.Lock()
+	prev := iface.pipeOnline && iface.transportOnline
+	iface.pipeOnline = online
+	curr := iface.pipeOnline && iface.transportOnline
+	cb := iface.onStatus
+	iface.mu.Unlock()
+
+	if prev != curr && cb != nil {
+		cb(curr)
 	}
 }
